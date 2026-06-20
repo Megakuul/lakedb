@@ -2,7 +2,6 @@ package lakedb
 
 import (
 	"context"
-	"fmt"
 	"io"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -14,6 +13,7 @@ type reader struct {
 	bucket string
 	key    string
 	client *s3.Client
+	cache  []byte
 }
 
 func newReader(ctx context.Context, client *s3.Client, bucket, key string) *reader {
@@ -29,7 +29,7 @@ func (r *reader) ReadAt(p []byte, offset int64) (int, error) {
 	result, err := r.client.GetObject(r.ctx, &s3.GetObjectInput{
 		Bucket: &r.bucket,
 		Key:    &r.key,
-		Range:  new(fmt.Sprintf("bytes=%d-", offset)),
+		// Range:  new(fmt.Sprintf("bytes=%d-", offset)),
 	})
 	if err != nil {
 		return 0, err

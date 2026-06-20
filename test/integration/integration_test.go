@@ -71,8 +71,13 @@ func TestOperations(t *testing.T) {
 	if err = ingestor.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	err = lakedb.Query(t.Context(), bucket, Request{})
+	rows, err := lakedb.Query(t.Context(), bucket, Request{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, row := range rows {
+		println("row")
+		println(row.Endpoint)
+	}
+	t.Fail()
 }

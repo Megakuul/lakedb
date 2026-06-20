@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"net/http"
 	"path"
@@ -22,6 +23,7 @@ import (
 	"github.com/aws/smithy-go"
 	"github.com/google/uuid"
 	"github.com/parquet-go/parquet-go"
+	"github.com/parquet-go/parquet-go/format"
 )
 
 type Bucket struct {
@@ -101,45 +103,36 @@ func checkNumeralBoundary[T int64 | float64](originalMin, originalMax T, filterM
 	return true
 }
 
-func (b *Bucket) Lookup(ctx context.Context, tableName string, filter Boundaries) error {
+func (b *Bucket) Lookup(ctx context.Context, tableName string, bounds Boundaries, filters map[string]checkFilter, extract func(io.ReaderAt, int64) bool) error {
 	b.catalogLock.RLock()
 	defer b.catalogLock.RUnlock()
-	shards := []Shard{}
 	table, ok := b.catalog.Tables[tableName]
 	if !ok {
 		return fmt.Errorf("table '%s' does not exist", tableName)
 	}
-	for _, shard := range table.Shards {
-		for name, field := range shard.Boundaries.Ints {
-			fieldFilter, ok := filter.Ints[name]
-			if ok && field.Min != nil && field.Max != nil {
-				if !checkNumeralBoundary(*field.Min, *field.Max, fieldFilter.Min, fieldFilter.Max) {
-					break
-				}
-			}
-		}
-		for name, field := range shard.Boundaries.Doubles {
-			fieldFilter, ok := filter.Doubles[name]
-			if ok && field.Min != nil && field.Max != nil {
-				if !checkNumeralBoundary(*field.Min, *field.Max, fieldFilter.Min, fieldFilter.Max) {
-					break
-				}
-			}
-		}
-		shards = append(shards, shard)
-	}
 
-	for _, shard := range shards {
-		reader := newReader(ctx, b.client, b.name, shard.Target)
-		file, err := parquet.OpenFile(reader, int64(shard.Size))
+	for _, shard := range filterShards(table.Shards, bounds) {
+		result, err := b.client.GetObject(ctx, &s3.GetObjectInput{
+			Bucket: &b.name,
+			Key:    &shard.Target,
+		})
+		if err != nil {
+			return err
+		}
+		defer result.Body.Close()
+		buffer, err := io.ReadAll(result.Body)
+		if err != nil {
+			return err
+		}
+		file, err := parquet.OpenFile(bytes.NewReader(buffer), int64(shard.Size))
 		if err != nil {
 			return fmt.Errorf("cannot open shard file '%s': %v", shard.Target, err)
 		}
-
 		if len(file.OffsetIndexes()) != len(file.ColumnIndexes()) {
 			return fmt.Errorf("corrupted column or offset index")
 		}
 
+		rows := map[int64]struct{}{}
 		for rgIdx, rg := range file.RowGroups() {
 			for columnIdx, column := range file.Root().Columns() {
 				// columnIndexes are stored in this weird rg1.col1,rg1.col2,rg2.col1,rg2.col2 format
@@ -154,98 +147,126 @@ func (b *Bucket) Lookup(ctx context.Context, tableName string, filter Boundaries
 				if len(rg.ColumnChunks()) <= columnIdx {
 					return fmt.Errorf("corrupted column chunk in row group")
 				}
-				pages := rg.ColumnChunks()[columnIdx].Pages()
-				defer pages.Close()
+				chunk := rg.ColumnChunks()[columnIdx]
 
-				check := func(min, max []byte) bool { return true }
+				checkFilter, ok := filters[column.Name()]
+				if !ok {
+					checkFilter = func(parquet.Value) bool { return true }
+				}
+				checkBoundary := func(min, max []byte) bool { return true }
 				switch column.Type() {
 				case parquet.Int64Type:
-					boundary := shard.Boundaries.Ints[column.Name()]
-					check = func(rawMin, rawMax []byte) bool {
+					boundary := bounds.Ints[column.Name()]
+					checkBoundary = func(rawMin, rawMax []byte) bool {
 						min := int64(binary.LittleEndian.Uint64(rawMin))
 						max := int64(binary.LittleEndian.Uint64(rawMax))
 						return checkNumeralBoundary(min, max, boundary.Min, boundary.Max)
 					}
 				case parquet.DoubleType:
-					boundary := shard.Boundaries.Doubles[column.Name()]
-					check = func(rawMin, rawMax []byte) bool {
+					boundary := bounds.Doubles[column.Name()]
+					checkBoundary = func(rawMin, rawMax []byte) bool {
 						min := math.Float64frombits(binary.LittleEndian.Uint64(rawMin))
 						max := math.Float64frombits(binary.LittleEndian.Uint64(rawMax))
 						return checkNumeralBoundary(min, max, boundary.Min, boundary.Max)
 					}
 				}
-				for pageIdx, rawMin := range columnIndex.MinValues {
-					if len(columnIndex.MaxValues) <= pageIdx {
-						return fmt.Errorf("corrupted column index boundary statistic")
-					}
-					if !check(rawMin, columnIndex.MaxValues[pageIdx]) {
+
+				matches, err := scanRows(chunk, columnIndex, offsetIndex, checkBoundary, checkFilter)
+				if err != nil {
+					return fmt.Errorf("failed scan rows: %v", err)
+				}
+				if columnIdx == 0 {
+					maps.Copy(rows, matches)
+					continue
+				}
+				// convert rows to a subset of matches (remove filtered out rows).
+				for row := range rows {
+					if _, ok := matches[row]; ok {
 						continue
 					}
-					if len(offsetIndex.PageLocations) <= pageIdx {
-						return fmt.Errorf("corrupted offset index")
-					}
-					pageLocation := offsetIndex.PageLocations[pageIdx]
-
-					err = pages.SeekToRow(pageLocation.FirstRowIndex)
-					if err != nil {
-						return fmt.Errorf("failed to seek to page row: %v", err)
-					}
-					page, err := pages.ReadPage()
-					if err != nil {
-						return fmt.Errorf("failed to read page: %v", err)
-					}
-					values := []parquet.Value{}
-					_, err = page.Values().ReadValues(values)
-					if err != nil {
-						return fmt.Errorf("failed to read rows: %v", err)
-					}
+					delete(rows, row)
 				}
 			}
 		}
 
-		for pageIdx, pageMeta := range file.ColumnIndexes() {
-			pageOffset := file.OffsetIndexes()[pageIdx]
-			println("page locs")
-			println(len(pageOffset.PageLocations))
-
-			println("min vals")
-			println(len(pageMeta.MaxValues))
-			_ = pageIdx
-			// for i, min := range pageMeta.MinValues {
-			// 	max := pageMeta.MaxValues[i]
-			//
-			// 	filter.Ints
-			// }
+		for row := range maps.Keys(rows) {
+			if !extract(file, row) {
+				break
+			}
 		}
 	}
-	return fmt.Errorf("alarm")
-	// 	for _, column := range file.ColumnIndexes() {
-	// 		_ = column
-	// 		// file.Root().Pages().SeekToRow()
-	// 	}
-	// 	for _, rg := range file.Metadata().RowGroups {
-	// 		for i, column := range rg.Columns {
-	// 			switch column.MetaData.Type {
-	// 			case format.Int64:
-	// 				fieldBoundary, ok := intBoundary[file.Root().Columns()[i].Name()]
-	// 				max := binary.LittleEndian.Uint64(column.MetaData.Statistics.MinValue)
-	// 				if ok && max <= fieldBoundary.Min || min >= fieldBoundary.Max {
-	// 				}
-	// 			case format.Double:
-	//
-	// 			}
-	// 			file.Root().Columns()[i].Name()
-	//
-	// 			column.MetaData.Type == parquet.Int64Type
-	// 			if ok {
-	// 				if column.MetaData.Statistics.Min <= filterField.Max && field.Max >= filterField.Min {
-	// 				}
-	// 			}
-	// 			column.MetaData.Statistics.Max
-	// 		}
-	// 	}
-	// }
 	return nil
+}
+
+type (
+	checkFilter   func(parquet.Value) bool
+	checkBoundary func(minRaw []byte, maxRaw []byte) bool
+)
+
+// scanRows checks the boundary for each page and applies the filter to each rows in matching pages.
+// Returns a map containing the global row index for each matching row.
+func scanRows(chunk parquet.ColumnChunk, column format.ColumnIndex, offset format.OffsetIndex, checkBoundary checkBoundary, checkFilter checkFilter) (map[int64]struct{}, error) {
+	pages := chunk.Pages()
+	defer pages.Close()
+
+	approved := map[int64]struct{}{}
+	for pageIdx, rawMin := range column.MinValues {
+		if len(column.MaxValues) <= pageIdx {
+			return nil, fmt.Errorf("corrupted column index boundary statistic")
+		}
+		if !checkBoundary(rawMin, column.MaxValues[pageIdx]) {
+			continue
+		}
+		if len(offset.PageLocations) <= pageIdx {
+			return nil, fmt.Errorf("corrupted offset index")
+		}
+		pageLocation := offset.PageLocations[pageIdx]
+
+		err := pages.SeekToRow(pageLocation.FirstRowIndex)
+		if err != nil {
+			return nil, fmt.Errorf("failed to seek to page row: %v", err)
+		}
+		page, err := pages.ReadPage()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read page: %v", err)
+		}
+		values := []parquet.Value{}
+		_, err = page.Values().ReadValues(values)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read rows: %v", err)
+		}
+		for valueIdx, value := range values {
+			if checkFilter(value) {
+				approved[pageLocation.FirstRowIndex+int64(valueIdx)] = struct{}{}
+			}
+		}
+	}
+	return approved, nil
+}
+
+// filterShards filters the shards based on the provided bounds.
+func filterShards(shards []Shard, bounds Boundaries) []Shard {
+	filteredShards := []Shard{}
+	for _, shard := range shards {
+		for name, field := range shard.Boundaries.Ints {
+			fieldFilter, ok := bounds.Ints[name]
+			if ok && field.Min != nil && field.Max != nil {
+				if !checkNumeralBoundary(*field.Min, *field.Max, fieldFilter.Min, fieldFilter.Max) {
+					break
+				}
+			}
+		}
+		for name, field := range shard.Boundaries.Doubles {
+			fieldFilter, ok := bounds.Doubles[name]
+			if ok && field.Min != nil && field.Max != nil {
+				if !checkNumeralBoundary(*field.Min, *field.Max, fieldFilter.Min, fieldFilter.Max) {
+					break
+				}
+			}
+		}
+		filteredShards = append(shards, shard)
+	}
+	return filteredShards
 }
 
 func (b *Bucket) Write(ctx context.Context, tableName string, data []byte, boundaries Boundaries) error {
