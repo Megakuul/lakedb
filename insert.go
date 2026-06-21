@@ -5,27 +5,29 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 
 	"github.com/parquet-go/parquet-go"
 )
 
 type Ingestor[T any] struct {
-	table      string
-	buffer     *bytes.Buffer
-	writer     *parquet.GenericWriter[T]
-	bucket     *Bucket
-	boundaries Boundaries
+	table       string
+	buffer      *parquet.GenericBuffer[T]
+	bucket      *Bucket
+	rangeBuffer Ranges
 }
 
 func NewIngestor[T any](bucket *Bucket) *Ingestor[T] {
-	buffer := bytes.NewBuffer(nil)
 	return &Ingestor[T]{
-		table:      getTableName(reflect.ValueOf(*new(T))),
-		buffer:     buffer,
-		writer:     parquet.NewGenericWriter[T](buffer),
-		bucket:     bucket,
-		boundaries: newBoundaries(),
+		table: getTableName(reflect.ValueOf(*new(T))),
+		buffer: parquet.NewGenericBuffer[T](parquet.SortingRowGroupConfig(
+			parquet.SortingColumns(
+				parquet.Ascending("timestamp"),
+			),
+		)),
+		bucket:      bucket,
+		rangeBuffer: newRanges(),
 	}
 }
 
@@ -47,32 +49,40 @@ func (i *Ingestor[T]) Insert(ctx context.Context, row T) error {
 		}
 		switch field := rowValue.FieldByIndex(fieldMeta.Index).Interface().(type) {
 		case Int:
-			boundary := i.boundaries.Ints[fieldName]
+			boundary := i.rangeBuffer.Ints[fieldName]
 			if boundary.Max == nil || *boundary.Max < field.Data {
 				boundary.Max = &field.Data
 			}
 			if boundary.Min == nil || *boundary.Min > field.Data {
 				boundary.Min = &field.Data
 			}
-			i.boundaries.Ints[fieldName] = boundary
+			i.rangeBuffer.Ints[fieldName] = boundary
 		case Double:
-			boundary := i.boundaries.Doubles[fieldName]
+			boundary := i.rangeBuffer.Doubles[fieldName]
 			if boundary.Max == nil || *boundary.Max < field.Data {
 				boundary.Max = &field.Data
 			}
 			if boundary.Min == nil || *boundary.Min > field.Data {
 				boundary.Min = &field.Data
 			}
-			i.boundaries.Doubles[fieldName] = boundary
+			i.rangeBuffer.Doubles[fieldName] = boundary
 		}
 	}
-	_, err := i.writer.Write([]T{row})
+	_, err := i.buffer.Write([]T{row})
 	return err
 }
 
 func (i *Ingestor[T]) Close(ctx context.Context) error {
-	if err := i.writer.Close(); err != nil {
+	sort.Sort(i.buffer)
+
+	output := bytes.NewBuffer(nil)
+	writer := parquet.NewGenericWriter[T](output)
+	_, err := parquet.CopyRows(writer, i.buffer.Rows())
+	if err != nil {
+		return fmt.Errorf("failed to flush parquet buffer: %v", err)
+	}
+	if err := writer.Close(); err != nil {
 		return fmt.Errorf("failed to flush parquet writer: %v", err)
 	}
-	return i.bucket.Write(ctx, i.table, i.buffer.Bytes(), i.boundaries)
+	return i.bucket.Write(ctx, i.table, output.Bytes(), i.rangeBuffer)
 }
