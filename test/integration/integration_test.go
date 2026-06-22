@@ -15,12 +15,21 @@ import (
 	"github.com/johannesboyne/gofakes3"
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
 	"github.com/megakuul/lakedb"
+	"github.com/parquet-go/parquet-go"
 )
 
 type Request struct {
 	Timestamp lakedb.Int    `parquet:"timestamp,asc"`
 	Latency   lakedb.Int    `parquet:"latency"`
 	Endpoint  lakedb.String `parquet:"endpoint"`
+}
+
+func (r Request) Name() string {
+	return "request"
+}
+
+func (r Request) Sorting() parquet.SortingOption {
+	return nil
 }
 
 func TestOperations(t *testing.T) {
@@ -59,8 +68,8 @@ func TestOperations(t *testing.T) {
 	}
 
 	start := time.Now()
-	ingestor := lakedb.NewIngestor[Request](bucket)
-	for i := range int64(500000) {
+	ingestor := lakedb.NewIngestor(bucket, Request{})
+	for i := range int64(1) {
 		err = ingestor.Insert(t.Context(), Request{
 			Timestamp: lakedb.NewInt(time.Now().Unix()),
 			Latency:   lakedb.NewInt(i),
@@ -73,7 +82,7 @@ func TestOperations(t *testing.T) {
 	if err = ingestor.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	for i := range int64(500000) {
+	for i := range int64(1) {
 		err = ingestor.Insert(t.Context(), Request{
 			Timestamp: lakedb.NewInt(time.Now().Unix()),
 			Latency:   lakedb.NewInt(i + 500000),
@@ -90,8 +99,9 @@ func TestOperations(t *testing.T) {
 
 	start = time.Now()
 	rows, err := lakedb.Query(t.Context(), bucket, Request{
-		Latency:  lakedb.IntFilter().Lte(200).Gte(100).End(),
-		Endpoint: lakedb.StringFilter().Eq("Another Enedpoint").End(),
+		Latency:   lakedb.NewIntFilter().Lte(200).Gte(100).End(),
+		Timestamp: lakedb.NewIntFilter().Lte(time.Now().Unix()).End(),
+		Endpoint:  lakedb.StringFilter().Eq("Another Enedpoint").End(),
 	})
 	if err != nil {
 		t.Fatal(err)

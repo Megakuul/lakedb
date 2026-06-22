@@ -8,26 +8,29 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/megakuul/lakedb/catalog"
 	"github.com/parquet-go/parquet-go"
 )
 
-type Ingestor[T any] struct {
-	table       string
-	buffer      *parquet.GenericBuffer[T]
-	bucket      *Bucket
-	rangeBuffer Ranges
+type Ingestor[T Table] struct {
+	table      string
+	buffer     *parquet.GenericBuffer[T]
+	bucket     *Bucket
+	partitions map[string]catalog.Partition
+	ranges     map[string]catalog.Range
 }
 
-func NewIngestor[T any](bucket *Bucket) *Ingestor[T] {
+func NewIngestor[T Table](bucket *Bucket, sample T) *Ingestor[T] {
 	return &Ingestor[T]{
-		table: getTableName(reflect.ValueOf(*new(T))),
+		table: sample.Name(),
 		buffer: parquet.NewGenericBuffer[T](parquet.SortingRowGroupConfig(
 			parquet.SortingColumns(
 				parquet.Ascending("timestamp"),
 			),
 		)),
-		bucket:      bucket,
-		rangeBuffer: newRanges(),
+		bucket:     bucket,
+		partitions: map[string]catalog.Partition{},
+		ranges:     map[string]catalog.Range{},
 	}
 }
 
@@ -49,23 +52,24 @@ func (i *Ingestor[T]) Insert(ctx context.Context, row T) error {
 		}
 		switch field := rowValue.FieldByIndex(fieldMeta.Index).Interface().(type) {
 		case Int:
-			boundary := i.rangeBuffer.Ints[fieldName]
-			if boundary.Max == nil || *boundary.Max < field.Data {
-				boundary.Max = &field.Data
+			filterRange := i.ranges[fieldName]
+			// TODO check if filterRange is actually int64
+			if filterRange.Max == nil || filterRange.Max.(int64) < field.Data {
+				filterRange.Max = field.Data
 			}
-			if boundary.Min == nil || *boundary.Min > field.Data {
-				boundary.Min = &field.Data
+			if filterRange.Min == nil || filterRange.Min.(int64) > field.Data {
+				filterRange.Min = field.Data
 			}
-			i.rangeBuffer.Ints[fieldName] = boundary
+			i.ranges[fieldName] = filterRange
 		case Double:
-			boundary := i.rangeBuffer.Doubles[fieldName]
-			if boundary.Max == nil || *boundary.Max < field.Data {
-				boundary.Max = &field.Data
+			filterRange := i.ranges[fieldName]
+			if filterRange.Max == nil || filterRange.Max.(float64) < field.Data {
+				filterRange.Max = field.Data
 			}
-			if boundary.Min == nil || *boundary.Min > field.Data {
-				boundary.Min = &field.Data
+			if filterRange.Min == nil || filterRange.Min.(float64) > field.Data {
+				filterRange.Min = field.Data
 			}
-			i.rangeBuffer.Doubles[fieldName] = boundary
+			i.ranges[fieldName] = filterRange
 		}
 	}
 	_, err := i.buffer.Write([]T{row})
@@ -84,5 +88,5 @@ func (i *Ingestor[T]) Close(ctx context.Context) error {
 	if err := writer.Close(); err != nil {
 		return fmt.Errorf("failed to flush parquet writer: %v", err)
 	}
-	return i.bucket.Write(ctx, i.table, output.Bytes(), i.rangeBuffer)
+	return i.bucket.write(ctx, i.table, output.Bytes(), i.partitions, i.ranges)
 }

@@ -18,12 +18,13 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
 	"github.com/google/uuid"
+	"github.com/megakuul/lakedb/catalog"
 )
 
 type Bucket struct {
 	client      *s3.Client
 	name        string
-	catalog     Catalog
+	catalog     catalog.Catalog
 	catalogLock sync.RWMutex
 }
 
@@ -73,10 +74,10 @@ func WithRegion(region string) BucketOption {
 func NewFromClient(ctx context.Context, client *s3.Client, bucket string) (*Bucket, error) {
 	b := &Bucket{
 		name: bucket,
-		catalog: Catalog{
+		catalog: catalog.Catalog{
 			Key:    "lakedb.catalog",
 			ETag:   nil,
-			Tables: map[string]Table{},
+			Tables: map[string]catalog.Table{},
 		},
 		catalogLock: sync.RWMutex{},
 		client:      client,
@@ -84,7 +85,7 @@ func NewFromClient(ctx context.Context, client *s3.Client, bucket string) (*Buck
 	return b, b.loadCatalog(ctx)
 }
 
-func (b *Bucket) Write(ctx context.Context, tableName string, data []byte, boundaries Ranges) error {
+func (b *Bucket) write(ctx context.Context, tableName string, data []byte, partitions map[string]catalog.Partition, ranges map[string]catalog.Range) error {
 	target := path.Join(tableName, uuid.New().String()+".parquet")
 	_, err := b.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      &b.name,
@@ -96,12 +97,13 @@ func (b *Bucket) Write(ctx context.Context, tableName string, data []byte, bound
 		return err
 	}
 
-	shard := Shard{
+	shard := catalog.Shard{
 		Size:       len(data),
 		Target:     target,
-		Boundaries: boundaries,
+		Partitions: partitions,
+		Ranges:     ranges,
 	}
-	modification := func(c *Catalog) error {
+	modification := func(c *catalog.Catalog) error {
 		table := c.Tables[tableName]
 		table.Shards = append(table.Shards, shard)
 		c.Tables[tableName] = table
@@ -166,7 +168,7 @@ var ErrOptimisticLock = errors.New("optimistic lock failure")
 
 // commitCatalog applies modification and writes the current catalog to datastore.
 // It uses optimistic locking, if retry is set to true it will retry once on optimistic failure.
-func (b *Bucket) commitCatalog(ctx context.Context, modification func(*Catalog) error) error {
+func (b *Bucket) commitCatalog(ctx context.Context, modification func(*catalog.Catalog) error) error {
 	b.catalogLock.Lock()
 	defer b.catalogLock.Unlock()
 	if err := modification(&b.catalog); err != nil {

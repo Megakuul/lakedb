@@ -1,12 +1,13 @@
 package lakedb
 
 import (
-	"reflect"
-	"strings"
+	"github.com/parquet-go/parquet-go"
 )
 
-// getTableName extracts the table name.
-// This is a standalone function because it is a contract between existing data and the reader.
-func getTableName(table reflect.Value) string {
-	return strings.ToLower(table.Type().Name())
+// Table is the interface that must be implemented by all parquet table structs.
+type Table interface {
+	// Name defines the table name in parquet. It is a hard contract to the data.
+	Name() string
+	// Sorting defines the table column sorting.
+	Sorting() parquet.SortingOption
 }

@@ -6,12 +6,13 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/megakuul/lakedb/catalog"
 	"github.com/parquet-go/parquet-go"
 )
 
-func Query[T any](ctx context.Context, bucket *Bucket, filter T) ([]T, error) {
-	boundaries := newBoundaries()
-	filters := map[string]checkFilter{}
+func Query[T Table](ctx context.Context, bucket *Bucket, filter T) ([]T, error) {
+	ranges := map[string]catalog.Range{}
+	checks := map[string]func(parquet.Value) bool{}
 	filterValue := reflect.ValueOf(filter)
 	if !filterValue.IsValid() {
 		return nil, fmt.Errorf("invalid input filter type (expected table struct)")
@@ -27,51 +28,26 @@ func Query[T any](ctx context.Context, bucket *Bucket, filter T) ([]T, error) {
 		} else {
 			fieldName = tag[0]
 		}
-		switch field := filterValue.FieldByIndex(fieldMeta.Index).Interface().(type) {
-		case Int:
-			boundaries.Ints[fieldName] = IntBoundary{Max: field.filter.max, Min: field.filter.min}
-			filters[fieldName] = func(v parquet.Value) bool {
-				if v.Kind() != parquet.Int64 {
-					return true
-				}
-				for _, op := range field.filter.filterOps {
-					if !op(v.Int64()) {
-						return false
-					}
-				}
-				return true
-			}
-		case Double:
-			boundaries.Doubles[fieldName] = DoubleBoundary{Max: field.filter.max, Min: field.filter.min}
-			filters[fieldName] = func(v parquet.Value) bool {
-				if v.Kind() != parquet.Double {
-					return true
-				}
-				for _, op := range field.filter.filterOps {
-					if !op(v.Double()) {
-						return false
-					}
-				}
-				return true
-			}
-		case String:
-			filters[fieldName] = func(v parquet.Value) bool {
-				if v.Kind() != parquet.ByteArray {
-					return true
-				}
-				for _, op := range field.filter.filterOps {
-					if !op(string(v.ByteArray())) {
-						return false
-					}
-				}
-				return true
-			}
+		switch filter := filterValue.FieldByIndex(fieldMeta.Index).Interface().(type) {
+		case rangeFilter:
+			ranges[fieldName] = catalog.Range{Max: filter.max(), Min: filter.min()}
+		case genericFilter:
+			checks[fieldName] = filter.filter
 		}
 	}
 
-	rows, err := lookup[T](ctx, bucket, getTableName(filterValue), boundaries, filters)
+	schema := parquet.NewSchema(filter.Name(), parquet.SchemaOf(*new(T)))
+	rows, err := bucket.lookup(ctx, schema, ranges, checks)
 	if err != nil {
 		return nil, err
 	}
-	return rows, nil
+	output := make([]T, 0, len(rows))
+	for _, row := range rows {
+		var outputRow T
+		if err = schema.Reconstruct(&outputRow, row); err != nil {
+			return nil, fmt.Errorf("failed to deserialize row: %v", err)
+		}
+		output = append(output, outputRow)
+	}
+	return output, nil
 }

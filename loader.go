@@ -9,32 +9,20 @@ import (
 	"slices"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/megakuul/lakedb/catalog"
 	"github.com/parquet-go/parquet-go"
 )
 
-// checkNumeralBoundary checks if the originalMin - originalMax range is INSIDE the filter range.
-// Filters are optional, if one side is omitted everything on this side matches
-// e.g. max == nil means original range must be between min - ∞.
-func checkNumeralBoundary[T int64 | float64](originalMin, originalMax T, filterMin, filterMax *T) bool {
-	if filterMin != nil && *filterMin > originalMax {
-		return false
-	}
-	if filterMax != nil && *filterMax < originalMin {
-		return false
-	}
-	return true
-}
-
-func (b *Bucket) lookup(ctx context.Context, tableName string, bounds Boundaries, filters map[string]checkFilter) ([]parquet.Row, error) {
+func (b *Bucket) lookup(ctx context.Context, schema *parquet.Schema, ranges map[string]catalog.Range, checks map[string]func(parquet.Value) bool) ([]parquet.Row, error) {
 	b.catalogLock.RLock()
 	defer b.catalogLock.RUnlock()
-	table, ok := b.catalog.Tables[tableName]
+	table, ok := b.catalog.Tables[schema.Name()]
 	if !ok {
-		return nil, fmt.Errorf("table '%s' does not exist", tableName)
+		return nil, fmt.Errorf("table '%s' does not exist", schema.Name())
 	}
 
 	rowGroups := []parquet.RowGroup{}
-	for _, shard := range filterShards(table.Shards, bounds) {
+	for _, shard := range filterShards(table.Shards, ranges) {
 		result, err := b.client.GetObject(ctx, &s3.GetObjectInput{
 			Bucket: &b.name,
 			Key:    &shard.Target,
@@ -53,56 +41,57 @@ func (b *Bucket) lookup(ctx context.Context, tableName string, bounds Boundaries
 		}
 		rowGroups = append(rowGroups, file.RowGroups()...)
 	}
-	rowGroup, err := parquet.MergeRowGroups(rowGroups)
+	rowGroup, err := parquet.MergeRowGroups(rowGroups, schema)
 	if err != nil {
 		return nil, fmt.Errorf("failed to merge row groups: %v", err)
 	}
 
-	rows := map[int64]struct{}{}
+	rowPositions := map[int64]struct{}{}
 
 	for _, chunk := range rowGroup.ColumnChunks() {
-		matches, err := scanRows(chunk, nil)
+		name := rowGroup.Schema().Columns()[chunk.Column()][0]
+		chunkCheck := func(parquet.Value) bool { return true }
+		if check, ok := checks[name]; ok {
+			chunkCheck = check
+		}
+		matches, err := scanRows(chunk, ranges[name], chunkCheck)
 		if err != nil {
 			return nil, fmt.Errorf("failed scan rows: %v", err)
 		}
 		if chunk.Column() == 0 {
-			maps.Copy(rows, matches)
+			maps.Copy(rowPositions, matches)
 			continue
 		}
 		// convert rows to a subset of matches (remove filtered out rows).
-		for row := range rows {
+		for row := range rowPositions {
 			if _, ok := matches[row]; ok {
 				continue
 			}
-			delete(rows, row)
+			delete(rowPositions, row)
 		}
 	}
 
 	reader := rowGroup.Rows()
 	defer reader.Close()
 
-	output := make([]parquet.Row, len(rows))
-	for i, row := range slices.Sorted(maps.Keys(rows)) {
-		if err = reader.SeekToRow(row); err != nil {
+	rows := make([]parquet.Row, 0, len(rowPositions))
+	for _, rowPosition := range slices.Sorted(maps.Keys(rowPositions)) {
+		if err = reader.SeekToRow(rowPosition); err != nil {
 			return nil, fmt.Errorf("failed to seek row: %v", err)
 		}
-		_, err := reader.ReadRows(output[i : i+1])
+		out := make([]parquet.Row, 1)
+		_, err := reader.ReadRows(out)
 		if err != nil && err != io.EOF {
 			return nil, fmt.Errorf("failed to read rows: %v", err)
 		}
+		rows = append(rows, out[0].Clone())
 	}
-	return output, nil
-}
-
-type filter interface {
-	AboveMax(parquet.Value) bool
-	BelowMin(parquet.Value) bool
-	Filter(parquet.Value) bool
+	return rows, nil
 }
 
 // scanRows checks the boundary for each page and applies the filter to each rows in matching pages.
 // Returns a map containing the global row index for each matching row.
-func scanRows(chunk parquet.ColumnChunk, filter filter) (map[int64]struct{}, error) {
+func scanRows(chunk parquet.ColumnChunk, filterRange catalog.Range, check func(parquet.Value) bool) (map[int64]struct{}, error) {
 	pages := chunk.Pages()
 	defer pages.Close()
 
@@ -119,11 +108,33 @@ func scanRows(chunk parquet.ColumnChunk, filter filter) (map[int64]struct{}, err
 
 	scannablePages := []int64{}
 	for i := range columnIndex.NumPages() {
-		if filter.AboveMax(columnIndex.MinValue(i)) {
-			continue
+		switch filterMax := filterRange.Max.(type) {
+		case int64:
+			if columnIndex.MinValue(i).Kind() != parquet.Int64 || columnIndex.MinValue(i).Int64() > filterMax {
+				continue
+			}
+		case float64:
+			if columnIndex.MinValue(i).Kind() != parquet.Double || columnIndex.MinValue(i).Double() > filterMax {
+				continue
+			}
+		case string:
+			if columnIndex.MinValue(i).Kind() != parquet.ByteArray || string(columnIndex.MinValue(i).ByteArray()) > filterMax {
+				continue
+			}
 		}
-		if filter.BelowMin(columnIndex.MaxValue(i)) {
-			continue
+		switch filterMin := filterRange.Min.(type) {
+		case int64:
+			if columnIndex.MinValue(i).Kind() != parquet.Int64 || columnIndex.MaxValue(i).Int64() < filterMin {
+				continue
+			}
+		case float64:
+			if columnIndex.MinValue(i).Kind() != parquet.Double || columnIndex.MaxValue(i).Double() < filterMin {
+				continue
+			}
+		case string:
+			if columnIndex.MinValue(i).Kind() != parquet.ByteArray || string(columnIndex.MaxValue(i).ByteArray()) < filterMin {
+				continue
+			}
 		}
 		scannablePages = append(scannablePages, offsetIndex.FirstRowIndex(i))
 	}
@@ -142,10 +153,8 @@ func scanRows(chunk parquet.ColumnChunk, filter filter) (map[int64]struct{}, err
 		if err != nil && err != io.EOF {
 			return nil, fmt.Errorf("failed to read rows: %v", err)
 		}
-		println("len of values per page")
-		println(n)
 		for valueIdx, value := range values[:n] {
-			if !filter.Filter(value) {
+			if !check(value) {
 				continue
 			}
 			approved[firstPageRow+int64(valueIdx)] = struct{}{}
@@ -154,23 +163,43 @@ func scanRows(chunk parquet.ColumnChunk, filter filter) (map[int64]struct{}, err
 	return approved, nil
 }
 
-// filterShards filters the shards based on the provided bounds.
-func filterShards(shards []Shard, bounds Boundaries) []Shard {
-	filteredShards := []Shard{}
+// filterShards filters the shards based on the provided ranges (filter and shard range must overlap on every filter column to match).
+func filterShards(shards []catalog.Shard, filter map[string]catalog.Range) []catalog.Shard {
+	filteredShards := []catalog.Shard{}
+
+Shards:
 	for _, shard := range shards {
-		for name, field := range shard.Boundaries.Ints {
-			fieldFilter, ok := bounds.Ints[name]
-			if ok && field.Min != nil && field.Max != nil {
-				if !checkNumeralBoundary(*field.Min, *field.Max, fieldFilter.Min, fieldFilter.Max) {
-					break
+		for column, shardRange := range shard.Ranges {
+			filterRange, ok := filter[column]
+			if !ok {
+				continue // unfiltered columns pass the filter
+			}
+			switch filterMax := filterRange.Max.(type) {
+			case int64:
+				if shardMin, ok := shardRange.Min.(int64); !ok || shardMin > filterMax {
+					continue Shards
+				}
+			case float64:
+				if shardMin, ok := shardRange.Min.(float64); !ok || shardMin > filterMax {
+					continue Shards
+				}
+			case string:
+				if shardMin, ok := shardRange.Min.(string); !ok || shardMin > filterMax {
+					continue Shards
 				}
 			}
-		}
-		for name, field := range shard.Boundaries.Doubles {
-			fieldFilter, ok := bounds.Doubles[name]
-			if ok && field.Min != nil && field.Max != nil {
-				if !checkNumeralBoundary(*field.Min, *field.Max, fieldFilter.Min, fieldFilter.Max) {
-					break
+			switch filterMin := filterRange.Min.(type) {
+			case int64:
+				if shardMax, ok := shardRange.Max.(int64); !ok || shardMax < filterMin {
+					continue Shards
+				}
+			case float64:
+				if shardMax, ok := shardRange.Max.(float64); !ok || shardMax < filterMin {
+					continue Shards
+				}
+			case string:
+				if shardMax, ok := shardRange.Max.(string); !ok || shardMax < filterMin {
+					continue Shards
 				}
 			}
 		}
