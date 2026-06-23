@@ -46,7 +46,7 @@ func (i *Ingestor[T]) Insert(ctx context.Context, row T) error {
 		fieldName := ""
 		tag := strings.SplitN(fieldMeta.Tag.Get("parquet"), ",", 2)
 		if len(tag) < 2 || tag[0] == "" {
-			fieldName = fieldMeta.Name
+			fieldName = strings.ToLower(fieldMeta.Name)
 		} else {
 			fieldName = tag[0]
 		}

@@ -22,16 +22,16 @@ func Query[T Table](ctx context.Context, bucket *Bucket, filter T) ([]T, error) 
 			continue
 		}
 		fieldName := ""
-		tag := strings.SplitN(fieldMeta.Tag.Get("parquet"), ",", 1)
+		tag := strings.SplitN(fieldMeta.Tag.Get("parquet"), ",", 2)
 		if len(tag) < 1 || tag[0] == "" {
-			fieldName = fieldMeta.Name
+			fieldName = strings.ToLower(fieldMeta.Name)
 		} else {
 			fieldName = tag[0]
 		}
-		switch filter := filterValue.FieldByIndex(fieldMeta.Index).Interface().(type) {
-		case rangeFilter:
+		if filter, ok := filterValue.FieldByIndex(fieldMeta.Index).Interface().(rangeFilter); ok {
 			ranges[fieldName] = catalog.Range{Max: filter.max(), Min: filter.min()}
-		case genericFilter:
+		}
+		if filter, ok := filterValue.FieldByIndex(fieldMeta.Index).Interface().(genericFilter); ok {
 			checks[fieldName] = filter.filter
 		}
 	}

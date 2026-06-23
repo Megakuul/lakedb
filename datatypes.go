@@ -15,9 +15,11 @@ type rangeFilter interface {
 	min() any
 }
 
+var _ genericFilter = &Int{}
+
 type Int struct {
-	Data   int64 `parquet:"data"`
-	filter intFilter
+	intFilter
+	Data int64 `parquet:"data"`
 }
 
 func NewInt(value int64) Int {
@@ -25,20 +27,19 @@ func NewInt(value int64) Int {
 }
 
 type intFilter struct {
-	maxValue  *int64
-	minValue  *int64
-	filterOps []func(int64) bool
+	maxValue, minValue any
+	filterOps          []func(int64) bool
 }
 
-func (d *intFilter) max() any {
+func (d intFilter) max() any {
 	return d.maxValue
 }
 
-func (d *intFilter) min() any {
+func (d intFilter) min() any {
 	return d.minValue
 }
 
-func (d *intFilter) filter(v parquet.Value) bool {
+func (d intFilter) filter(v parquet.Value) bool {
 	if v.Kind() != parquet.Int64 {
 		return true
 	}
@@ -55,7 +56,7 @@ func NewIntFilter() *intFilter {
 }
 
 func (d *intFilter) Gte(operand int64) *intFilter {
-	d.minValue = &operand
+	d.minValue = operand
 	d.filterOps = append(d.filterOps, func(i int64) bool {
 		return i >= operand
 	})
@@ -63,7 +64,7 @@ func (d *intFilter) Gte(operand int64) *intFilter {
 }
 
 func (d *intFilter) Lte(operand int64) *intFilter {
-	d.maxValue = &operand
+	d.maxValue = operand
 	d.filterOps = append(d.filterOps, func(i int64) bool {
 		return i <= operand
 	})
@@ -71,7 +72,7 @@ func (d *intFilter) Lte(operand int64) *intFilter {
 }
 
 func (d *intFilter) Gt(operand int64) *intFilter {
-	d.minValue = &operand
+	d.minValue = operand
 	d.filterOps = append(d.filterOps, func(i int64) bool {
 		return i > operand
 	})
@@ -79,7 +80,7 @@ func (d *intFilter) Gt(operand int64) *intFilter {
 }
 
 func (d *intFilter) Lt(operand int64) *intFilter {
-	d.maxValue = &operand
+	d.maxValue = operand
 	d.filterOps = append(d.filterOps, func(i int64) bool {
 		return i < operand
 	})
@@ -87,14 +88,12 @@ func (d *intFilter) Lt(operand int64) *intFilter {
 }
 
 func (d *intFilter) End() Int {
-	return Int{
-		filter: *d,
-	}
+	return Int{*d, 0}
 }
 
 type Double struct {
-	Data   float64 `parquet:"data"`
-	filter doubleFilter
+	doubleFilter
+	Data float64 `parquet:"data"`
 }
 
 func NewDouble(value float64) Double {
@@ -102,20 +101,19 @@ func NewDouble(value float64) Double {
 }
 
 type doubleFilter struct {
-	maxValue  *float64
-	minValue  *float64
-	filterOps []func(float64) bool
+	maxValue, minValue any
+	filterOps          []func(float64) bool
 }
 
-func (d *doubleFilter) max() any {
+func (d doubleFilter) max() any {
 	return d.maxValue
 }
 
-func (d *doubleFilter) min() any {
+func (d doubleFilter) min() any {
 	return d.minValue
 }
 
-func (d *doubleFilter) filter(v parquet.Value) bool {
+func (d doubleFilter) filter(v parquet.Value) bool {
 	if v.Kind() != parquet.Double {
 		return true
 	}
@@ -132,7 +130,7 @@ func NewDoubleFilter() *doubleFilter {
 }
 
 func (d *doubleFilter) Gte(operand float64) *doubleFilter {
-	d.minValue = &operand
+	d.minValue = operand
 	d.filterOps = append(d.filterOps, func(i float64) bool {
 		return i >= operand
 	})
@@ -140,7 +138,7 @@ func (d *doubleFilter) Gte(operand float64) *doubleFilter {
 }
 
 func (d *doubleFilter) Lte(operand float64) *doubleFilter {
-	d.maxValue = &operand
+	d.maxValue = operand
 	d.filterOps = append(d.filterOps, func(i float64) bool {
 		return i <= operand
 	})
@@ -148,7 +146,7 @@ func (d *doubleFilter) Lte(operand float64) *doubleFilter {
 }
 
 func (d *doubleFilter) Gt(operand float64) *doubleFilter {
-	d.minValue = &operand
+	d.minValue = operand
 	d.filterOps = append(d.filterOps, func(i float64) bool {
 		return i > operand
 	})
@@ -156,7 +154,7 @@ func (d *doubleFilter) Gt(operand float64) *doubleFilter {
 }
 
 func (d *doubleFilter) Lt(operand float64) *doubleFilter {
-	d.maxValue = &operand
+	d.maxValue = operand
 	d.filterOps = append(d.filterOps, func(i float64) bool {
 		return i < operand
 	})
@@ -164,14 +162,12 @@ func (d *doubleFilter) Lt(operand float64) *doubleFilter {
 }
 
 func (d *doubleFilter) End() Double {
-	return Double{
-		filter: *d,
-	}
+	return Double{*d, 0}
 }
 
 type String struct {
-	Data   string `parquet:"data"`
-	filter stringFilter
+	stringFilter
+	Data string `parquet:"data"`
 }
 
 func NewString(value string) String {
@@ -182,7 +178,19 @@ type stringFilter struct {
 	filterOps []func(string) bool
 }
 
-func StringFilter() *stringFilter {
+func (d stringFilter) filter(v parquet.Value) bool {
+	if v.Kind() != parquet.ByteArray {
+		return true
+	}
+	for _, op := range d.filterOps {
+		if !op(string(v.ByteArray())) {
+			return false
+		}
+	}
+	return true
+}
+
+func NewStringFilter() *stringFilter {
 	return new(stringFilter)
 }
 
@@ -208,7 +216,5 @@ func (f *stringFilter) Contains(operand string) *stringFilter {
 }
 
 func (f *stringFilter) End() String {
-	return String{
-		filter: *f,
-	}
+	return String{*f, ""}
 }

@@ -140,6 +140,7 @@ func scanChunk(chunk parquet.ColumnChunk, filterRange catalog.Range, check func(
 	}
 
 	for _, firstPageRow := range scannablePages {
+		// ~ >100 ms
 		err := pages.SeekToRow(firstPageRow)
 		if err != nil {
 			return nil, fmt.Errorf("failed to seek to page row: %v", err)
@@ -148,6 +149,9 @@ func scanChunk(chunk parquet.ColumnChunk, filterRange catalog.Range, check func(
 		if err != nil {
 			return nil, fmt.Errorf("failed to read page: %v", err)
 		}
+		// ~ >100 ms
+
+		// ~ >200 ms
 		values := make([]parquet.Value, page.NumValues())
 		n, err := page.Values().ReadValues(values)
 		if err != nil && err != io.EOF {
@@ -159,6 +163,7 @@ func scanChunk(chunk parquet.ColumnChunk, filterRange catalog.Range, check func(
 			}
 			approved[firstPageRow+int64(valueIdx)] = struct{}{}
 		}
+		// ~ >200 ms
 	}
 	return approved, nil
 }
@@ -205,5 +210,6 @@ Shards:
 		}
 		filteredShards = append(filteredShards, shard)
 	}
+	println("shard count: ", len(filteredShards))
 	return filteredShards
 }

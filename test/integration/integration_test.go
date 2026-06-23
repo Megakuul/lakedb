@@ -69,7 +69,7 @@ func TestOperations(t *testing.T) {
 
 	start := time.Now()
 	ingestor := lakedb.NewIngestor(bucket, Request{})
-	for i := range int64(1000000) {
+	for i := range int64(2) {
 		err = ingestor.Insert(t.Context(), Request{
 			Timestamp: lakedb.NewInt(69),
 			Latency:   lakedb.NewInt(i),
@@ -83,7 +83,7 @@ func TestOperations(t *testing.T) {
 		t.Fatal(err)
 	}
 	ingestor = lakedb.NewIngestor(bucket, Request{})
-	for i := range int64(1000000) {
+	for i := range int64(5000000) {
 		err = ingestor.Insert(t.Context(), Request{
 			Timestamp: lakedb.NewInt(187),
 			Latency:   lakedb.NewInt(i + 500000),
@@ -96,18 +96,18 @@ func TestOperations(t *testing.T) {
 	if err = ingestor.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	println(time.Since(start).String())
+	println("insert ", time.Since(start).String())
 
 	start = time.Now()
 	rows, err := lakedb.Query(t.Context(), bucket, Request{
-		Latency:   lakedb.NewIntFilter().Lte(200).Gte(100).End(),
 		Timestamp: lakedb.NewIntFilter().Lte(time.Now().Unix()).End(),
-		Endpoint:  lakedb.StringFilter().Eq("Another Enedpoint").End(),
+		Latency:   lakedb.NewIntFilter().Lte(500000).End(),
+		Endpoint:  lakedb.NewStringFilter().Contains("Another Enedpoint").End(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	println(time.Since(start).String())
+	println("query ", time.Since(start).String())
 	println("total:")
 	println(len(rows))
 	t.Fail()
