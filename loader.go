@@ -5,14 +5,13 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"maps"
-	"slices"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/megakuul/lakedb/catalog"
 	"github.com/parquet-go/parquet-go"
 )
 
+// lookup uses the provided ranges and checks to efficiently find all matching rows.
 func (b *Bucket) lookup(ctx context.Context, schema *parquet.Schema, ranges map[string]catalog.Range, checks map[string]func(parquet.Value) bool) ([]parquet.Row, error) {
 	b.catalogLock.RLock()
 	defer b.catalogLock.RUnlock()
@@ -46,7 +45,10 @@ func (b *Bucket) lookup(ctx context.Context, schema *parquet.Schema, ranges map[
 		return nil, fmt.Errorf("failed to merge row groups: %v", err)
 	}
 
-	rowPositions := map[int64]struct{}{}
+	// TODO this could be a bitset instead to reduce size from chunk.NumValues() * 1 byte -> chunk.NumValues() * 1 bit
+	// but linus, why is this not a map anymore?
+	// -> It's a tragedy I know, even the cpu cache misses the map ^^
+	rows := make([]bool, rowGroup.NumRows())
 
 	for _, chunk := range rowGroup.ColumnChunks() {
 		name := rowGroup.Schema().Columns()[chunk.Column()][0]
@@ -54,29 +56,33 @@ func (b *Bucket) lookup(ctx context.Context, schema *parquet.Schema, ranges map[
 		if check, ok := checks[name]; ok {
 			chunkCheck = check
 		}
-		matches, err := scanChunk(chunk, ranges[name], chunkCheck)
-		if err != nil {
-			return nil, fmt.Errorf("failed scan rows: %v", err)
+		matches := make([]bool, rowGroup.NumRows())
+		if err := scanChunk(chunk, matches, ranges[name], chunkCheck); err != nil {
+			return nil, fmt.Errorf("failed scan chunk: %v", err)
 		}
+		// take the set from the first column as base.
 		if chunk.Column() == 0 {
-			maps.Copy(rowPositions, matches)
+			rows = matches
 			continue
 		}
-		// convert rows to a subset of matches (remove filtered out rows).
-		for row := range rowPositions {
-			if _, ok := matches[row]; ok {
+		// subsequent matches will just remove non-matching values from base (column filters are always AND joined).
+		for row, ok := range rows {
+			if ok && matches[row] {
 				continue
 			}
-			delete(rowPositions, row)
+			rows[row] = false
 		}
 	}
 
 	reader := rowGroup.Rows()
 	defer reader.Close()
 
-	rows := make([]parquet.Row, 0, len(rowPositions))
-	for _, rowPosition := range slices.Sorted(maps.Keys(rowPositions)) {
-		if err = reader.SeekToRow(rowPosition); err != nil {
+	parquetRows := make([]parquet.Row, 0)
+	for row, ok := range rows {
+		if !ok {
+			continue
+		}
+		if err = reader.SeekToRow(int64(row)); err != nil {
 			return nil, fmt.Errorf("failed to seek row: %v", err)
 		}
 		out := make([]parquet.Row, 1)
@@ -84,26 +90,24 @@ func (b *Bucket) lookup(ctx context.Context, schema *parquet.Schema, ranges map[
 		if err != nil && err != io.EOF {
 			return nil, fmt.Errorf("failed to read rows: %v", err)
 		}
-		rows = append(rows, out[0].Clone())
+		parquetRows = append(parquetRows, out[0].Clone())
 	}
-	return rows, nil
+	return parquetRows, nil
 }
 
-// scanChunk checks the boundary for each page and applies the filter to each rows in matching pages.
-// Returns a map containing the global row index for each matching row.
-func scanChunk(chunk parquet.ColumnChunk, filterRange catalog.Range, check func(parquet.Value) bool) (map[int64]struct{}, error) {
+// scanChunk checks the boundary for each page and applies the filter to each row in matching pages.
+// It marks all passing rows in the provided rows map as true.
+func scanChunk(chunk parquet.ColumnChunk, rows []bool, filterRange catalog.Range, check func(parquet.Value) bool) error {
 	pages := chunk.Pages()
 	defer pages.Close()
 
-	approved := map[int64]struct{}{}
-
 	columnIndex, err := chunk.ColumnIndex()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read column index: %v", err)
+		return fmt.Errorf("failed to read column index: %v", err)
 	}
 	offsetIndex, err := chunk.OffsetIndex()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read column index: %v", err)
+		return fmt.Errorf("failed to read column index: %v", err)
 	}
 
 	scannablePages := []int64{}
@@ -140,32 +144,31 @@ func scanChunk(chunk parquet.ColumnChunk, filterRange catalog.Range, check func(
 	}
 
 	for _, firstPageRow := range scannablePages {
-		// ~ >100 ms
 		err := pages.SeekToRow(firstPageRow)
 		if err != nil {
-			return nil, fmt.Errorf("failed to seek to page row: %v", err)
+			return fmt.Errorf("failed to seek to page row: %v", err)
 		}
 		page, err := pages.ReadPage()
 		if err != nil {
-			return nil, fmt.Errorf("failed to read page: %v", err)
+			return fmt.Errorf("failed to read page: %v", err)
 		}
-		// ~ >100 ms
 
-		// ~ >200 ms
 		values := make([]parquet.Value, page.NumValues())
 		n, err := page.Values().ReadValues(values)
 		if err != nil && err != io.EOF {
-			return nil, fmt.Errorf("failed to read rows: %v", err)
+			return fmt.Errorf("failed to read rows: %v", err)
 		}
 		for valueIdx, value := range values[:n] {
 			if !check(value) {
 				continue
 			}
-			approved[firstPageRow+int64(valueIdx)] = struct{}{}
+			if int(firstPageRow)+valueIdx >= len(rows) {
+				return fmt.Errorf("more rows then values in column chunk this is not allowed by lakedb!")
+			}
+			rows[firstPageRow+int64(valueIdx)] = true
 		}
-		// ~ >200 ms
 	}
-	return approved, nil
+	return nil
 }
 
 // filterShards filters the shards based on the provided ranges (filter and shard range must overlap on every filter column to match).
@@ -210,6 +213,5 @@ Shards:
 		}
 		filteredShards = append(filteredShards, shard)
 	}
-	println("shard count: ", len(filteredShards))
 	return filteredShards
 }
