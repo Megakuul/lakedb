@@ -11,8 +11,23 @@ import (
 	"github.com/parquet-go/parquet-go"
 )
 
+// query is the internal api between the engine and the querybuilder.
+// it defines all query stages:
+// 1. range filters (compares numeral or alphabetical ranges against the catalog / parquet statistics)
+// 2. check filters (perform exact fine grained filtering on values that passed the range filter).
+// 3. limit applies to stop the filtering process.
+// 4. grouping (uses fine grained filters to group rows into one or more "windows" (by default just one global window))
+// 5. aggregator (takes the grouped "windows" and applies aggregation to each column to collapse the grouped rows)
+type query struct {
+	ranges     map[string]catalog.Range
+	checks     map[string]func(parquet.Value) bool
+	limit      int
+	grouping   []map[string]func(parquet.Value) bool            // grouping must contain at least one entry (otherwise nothing is returned).
+	aggregator []map[string]func([]parquet.Value) parquet.Value // aggregator is expected to match to the number of groups.
+}
+
 // lookup uses the provided ranges and checks to efficiently find all matching rows.
-func (b *Bucket) lookup(ctx context.Context, schema *parquet.Schema, ranges map[string]catalog.Range, checks map[string]func(parquet.Value) bool) ([]parquet.Row, error) {
+func (b *Bucket) lookup(ctx context.Context, schema *parquet.Schema, q *query) ([]parquet.Row, error) {
 	b.catalogLock.RLock()
 	defer b.catalogLock.RUnlock()
 	table, ok := b.catalog.Tables[schema.Name()]
@@ -21,7 +36,7 @@ func (b *Bucket) lookup(ctx context.Context, schema *parquet.Schema, ranges map[
 	}
 
 	rowGroups := []parquet.RowGroup{}
-	for _, shard := range filterShards(table.Shards, ranges) {
+	for _, shard := range filterShards(table.Shards, q.ranges) {
 		result, err := b.client.GetObject(ctx, &s3.GetObjectInput{
 			Bucket: &b.name,
 			Key:    &shard.Target,
@@ -45,32 +60,41 @@ func (b *Bucket) lookup(ctx context.Context, schema *parquet.Schema, ranges map[
 		return nil, fmt.Errorf("failed to merge row groups: %v", err)
 	}
 
-	// TODO this could be a bitset instead to reduce size from chunk.NumValues() * 1 byte -> chunk.NumValues() * 1 bit
-	// but linus, why is this not a map anymore?
-	// -> It's a tragedy I know, even the cpu cache misses the map ^^
-	rows := make([]bool, rowGroup.NumRows())
+	// groups represent the output mapping of group idx -> row idx -> matched in the filter.
+	groups := make([][]bool, len(q.grouping))
+	for group := range groups {
+		// TODO this could be a bitset instead to reduce size from chunk.NumValues() * 1 byte -> chunk.NumValues() * 1 bit
+		// but linus, why is this not a map anymore?
+		// -> It's a tragedy I know, even the cpu cache misses the map ^^
+		groups[group] = make([]bool, rowGroup.NumRows())
+	}
 
 	for _, chunk := range rowGroup.ColumnChunks() {
-		name := rowGroup.Schema().Columns()[chunk.Column()][0]
+		columnName := rowGroup.Schema().Columns()[chunk.Column()][0]
 		chunkCheck := func(parquet.Value) bool { return true }
-		if check, ok := checks[name]; ok {
+		if check, ok := q.checks[columnName]; ok {
 			chunkCheck = check
 		}
 		matches := make([]bool, rowGroup.NumRows())
-		if err := scanChunk(chunk, matches, ranges[name], chunkCheck); err != nil {
+		if err := scanChunk(chunk, matches, q.ranges[columnName], chunkCheck); err != nil {
 			return nil, fmt.Errorf("failed scan chunk: %v", err)
 		}
-		// take the set from the first column as base.
-		if chunk.Column() == 0 {
-			rows = matches
-			continue
-		}
-		// subsequent matches will just remove non-matching values from base (column filters are always AND joined).
-		for row, ok := range rows {
-			if ok && matches[row] {
+		for group, groupFilters := range q.grouping {
+			if filter, ok := groupFilters[columnName]; ok {
+				filter()
+			}
+			// take the set from the first column as base.
+			if chunk.Column() == 0 {
+				groups[group] = matches
 				continue
 			}
-			rows[row] = false
+			// subsequent matches will just remove non-matching values from base (column filters are always AND joined).
+			for row, ok := range groups[group] {
+				if ok && matches[row] {
+					continue
+				}
+				groups[group][row] = false
+			}
 		}
 	}
 
@@ -81,6 +105,10 @@ func (b *Bucket) lookup(ctx context.Context, schema *parquet.Schema, ranges map[
 	for row, ok := range rows {
 		if !ok {
 			continue
+		}
+		// TODO could be done earlier to avoid filter overhead, but requires more sophisticated engine.
+		if len(parquetRows) >= q.limit {
+			break
 		}
 		if err = reader.SeekToRow(int64(row)); err != nil {
 			return nil, fmt.Errorf("failed to seek row: %v", err)

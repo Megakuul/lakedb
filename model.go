@@ -1,6 +1,9 @@
 package lakedb
 
 import (
+	"reflect"
+	"strings"
+
 	"github.com/parquet-go/parquet-go"
 )
 
@@ -10,4 +13,14 @@ type Table interface {
 	Name() string
 	// Sorting defines the table column sorting.
 	Sorting() parquet.SortingOption
+}
+
+// getColumnName extracts the parquet column name from a struct field.
+// It is compatible to the parquet library struct tagging system.
+func getColumnName(field reflect.StructField) string {
+	tag := strings.SplitN(field.Tag.Get("parquet"), ",", 2)
+	if len(tag) < 1 || tag[0] == "" {
+		return strings.ToLower(field.Name)
+	}
+	return tag[0]
 }

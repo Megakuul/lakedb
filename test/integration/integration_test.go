@@ -18,6 +18,12 @@ import (
 	"github.com/parquet-go/parquet-go"
 )
 
+type RequestAggregate struct {
+	Timestamp lakedb.Int    `parquet:"timestamp,asc"`
+	Latency   lakedb.Int    `parquet:"latency"`
+	Endpoint  lakedb.String `parquet:"endpoint"`
+}
+
 type Request struct {
 	Timestamp lakedb.Int    `parquet:"timestamp,asc"`
 	Latency   lakedb.Int    `parquet:"latency"`
