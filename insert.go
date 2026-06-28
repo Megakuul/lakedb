@@ -19,13 +19,12 @@ type Ingestor[T Table] struct {
 	ranges map[string]catalog.Range
 }
 
-func NewIngestor[T Table](bucket *Bucket, sample T) *Ingestor[T] {
+func NewIngestor[T Table](bucket *Bucket) *Ingestor[T] {
+	pseudo := *new(T)
 	return &Ingestor[T]{
-		table: sample.Name(),
+		table: pseudo.Name(),
 		buffer: parquet.NewGenericBuffer[T](parquet.SortingRowGroupConfig(
-			parquet.SortingColumns(
-				parquet.Ascending("timestamp"),
-			),
+			pseudo.Sorting(),
 		)),
 		bucket: bucket,
 		ranges: map[string]catalog.Range{},
@@ -48,26 +47,15 @@ func (i *Ingestor[T]) Insert(ctx context.Context, row T) error {
 		} else {
 			fieldName = tag[0]
 		}
-		switch field := rowValue.FieldByIndex(fieldMeta.Index).Interface().(type) {
-		case Int:
+
+		if filter, ok := rowValue.FieldByIndex(fieldMeta.Index).Interface().(boundable); ok {
 			filterRange := i.ranges[fieldName]
-			// TODO check if filterRange is actually int64
-			if filterRange.Max == nil || filterRange.Max.(int64) < field.Data {
-				filterRange.Max = field.Data
+			if newMax, ok := filter.higher(filterRange.Max); ok {
+				filterRange.Max = newMax
 			}
-			if filterRange.Min == nil || filterRange.Min.(int64) > field.Data {
-				filterRange.Min = field.Data
+			if newMin, ok := filter.lower(filterRange.Min); ok {
+				filterRange.Min = newMin
 			}
-			i.ranges[fieldName] = filterRange
-		case Double:
-			filterRange := i.ranges[fieldName]
-			if filterRange.Max == nil || filterRange.Max.(float64) < field.Data {
-				filterRange.Max = field.Data
-			}
-			if filterRange.Min == nil || filterRange.Min.(float64) > field.Data {
-				filterRange.Min = field.Data
-			}
-			i.ranges[fieldName] = filterRange
 		}
 	}
 

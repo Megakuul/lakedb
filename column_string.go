@@ -1,0 +1,87 @@
+package lakedb
+
+import (
+	"github.com/parquet-go/parquet-go"
+)
+
+var (
+	_ filterable = String{}
+	_ boundable  = String{}
+)
+
+type String struct {
+	filters []Filter[string]
+	Data    string `parquet:"data"`
+}
+
+func NewString(value string) String {
+	return String{Data: value}
+}
+
+func AggrString(grouping ...Filter[string]) String {
+	f := String{
+		filters: grouping,
+	}
+	return f
+}
+
+func FilterString(filters ...Filter[string]) String {
+	f := String{
+		filters: filters,
+	}
+	return f
+}
+
+func (f String) higher(than any) (any, bool) {
+	if than, ok := than.(string); ok {
+		return &f.Data, f.Data > than
+	}
+	return nil, false
+}
+
+func (f String) lower(than any) (any, bool) {
+	if than, ok := than.(string); ok {
+		return &f.Data, f.Data < than
+	}
+	return nil, false
+}
+
+func (f String) max() any {
+	var max *string
+	for _, filter := range f.filters {
+		if filter.max != nil && (max == nil || *max < *filter.max) {
+			max = filter.max
+		}
+	}
+	if max == nil {
+		return nil
+	} else {
+		return *max
+	}
+}
+
+func (f String) min() any {
+	var min *string
+	for _, filter := range f.filters {
+		if filter.min != nil && (min == nil || *min > *filter.min) {
+			min = filter.min
+		}
+	}
+	if min == nil {
+		return nil
+	} else {
+		return *min
+	}
+}
+
+func (f String) filter(v parquet.Value) bool {
+	if v.Kind() != parquet.ByteArray {
+		return true
+	}
+	for _, op := range f.filters {
+		if !op.check(string(v.ByteArray())) {
+			return false
+		}
+	}
+	return true
+}
