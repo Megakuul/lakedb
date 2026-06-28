@@ -20,7 +20,7 @@ type Table interface {
 func getColumnName(field reflect.StructField) string {
 	tag := strings.SplitN(field.Tag.Get("parquet"), ",", 2)
 	if len(tag) < 1 || tag[0] == "" {
-		return strings.ToLower(field.Name)
+		return field.Name
 	}
 	return tag[0]
 }

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
-	"strings"
 
 	"github.com/megakuul/lakedb/catalog"
 	"github.com/parquet-go/parquet-go"
@@ -36,20 +35,14 @@ func (i *Ingestor[T]) Insert(ctx context.Context, row T) error {
 	if !rowValue.IsValid() {
 		return fmt.Errorf("row type is invalid (expected non-nil struct)")
 	}
-	for fieldMeta := range rowValue.Fields() {
-		if !fieldMeta.IsExported() {
+	for columnMeta := range rowValue.Fields() {
+		if !columnMeta.IsExported() {
 			continue
 		}
-		fieldName := ""
-		tag := strings.SplitN(fieldMeta.Tag.Get("parquet"), ",", 2)
-		if len(tag) < 2 || tag[0] == "" {
-			fieldName = strings.ToLower(fieldMeta.Name)
-		} else {
-			fieldName = tag[0]
-		}
+		columnName := getColumnName(columnMeta)
 
-		if filter, ok := rowValue.FieldByIndex(fieldMeta.Index).Interface().(boundable); ok {
-			filterRange := i.ranges[fieldName]
+		if filter, ok := rowValue.FieldByIndex(columnMeta.Index).Interface().(boundable); ok {
+			filterRange := i.ranges[columnName]
 			if newMax, ok := filter.higher(filterRange.Max); ok {
 				filterRange.Max = newMax
 			}
