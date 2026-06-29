@@ -31,8 +31,8 @@ func (l Log) Sorting() parquet.SortingOption {
 func testFilter(t *testing.T, bucket *lake.Bucket) {
 	now := time.Now()
 	// prepare
-	ingestor := lake.NewIngestor[Log](bucket)
-	ingestor.Insert(t.Context(), Log{
+	ingestorA, ingestorB := lake.NewIngestor[Log](bucket), lake.NewIngestor[Log](bucket)
+	ingestorA.Insert(t.Context(), Log{
 		Timestamp:  lake.NewInt(now.Unix()),
 		Service:    lake.NewString("elephant"),
 		Importance: lake.NewFloat(99.9),
@@ -40,24 +40,42 @@ func testFilter(t *testing.T, bucket *lake.Bucket) {
 		ignore:     lake.NewFloat(187.0),
 		Static:     420,
 	})
-	ingestor.Insert(t.Context(), Log{
+	ingestorB.Insert(t.Context(), Log{
 		Timestamp:  lake.NewInt(now.Unix() + 1),
 		Service:    lake.NewString("elephant"),
 		Importance: lake.NewFloat(20),
 		Message:    lake.NewString("we caught him, however, now he is eating the control panel"),
 	})
-	ingestor.Insert(t.Context(), Log{
+	// dump some garbage data inbetween
+	for i := range int64(50000) {
+		ingestorB.Insert(t.Context(), Log{
+			Timestamp:  lake.NewInt(50 + i),
+			Service:    lake.NewString("elephantor"),
+			Importance: lake.NewFloat(0),
+			Message:    lake.NewString("GARBAGGEEGGEGEG"),
+		})
+	}
+	ingestorA.Insert(t.Context(), Log{
 		Timestamp:  lake.NewInt(now.Unix() + 2),
 		Service:    lake.NewString("camera"),
 		Importance: lake.NewFloat(50),
 		Message:    lake.NewString("I detected an elephant in the room"),
 	})
-	ingestor.Insert(t.Context(), Log{
+	// dump some garbage data inbetween
+	for i := range int64(50000) {
+		ingestorA.Insert(t.Context(), Log{
+			Timestamp:  lake.NewInt(50 + i),
+			Service:    lake.NewString("elephantor"),
+			Importance: lake.NewFloat(0),
+			Message:    lake.NewString("GARBAGGEEGGEGEG"),
+		})
+	}
+	ingestorB.Insert(t.Context(), Log{
 		Timestamp:  lake.NewInt(now.Unix() + 3),
 		Importance: lake.NewFloat(1.0),
 		Message:    lake.NewString("wait guys this is my first day... what should I do here?"),
 	})
-	ingestor.Insert(t.Context(), Log{
+	ingestorA.Insert(t.Context(), Log{
 		Timestamp:  lake.NewInt(now.Add(time.Hour).Unix()),
 		Service:    lake.NewString("camera"),
 		Importance: lake.NewFloat(13.37),
@@ -65,7 +83,10 @@ func testFilter(t *testing.T, bucket *lake.Bucket) {
 		Static:     50,
 		ignore:     lake.NewFloat(1337.420),
 	})
-	if err := ingestor.Close(t.Context()); err != nil {
+	if err := ingestorB.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := ingestorA.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
