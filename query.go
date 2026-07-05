@@ -21,7 +21,7 @@ func Query[T Table]() *QueryBuilder[T] {
 		ranges:      map[string]catalog.Range{},
 		checks:      map[string]func(parquet.Value) bool{},
 		limit:       -1,
-		grouping:    map[string]func(parquet.Value) (string, parquet.Value){},
+		grouping:    map[string]func(parquet.Value) (uint64, parquet.Value){},
 		aggregators: map[string]func([]parquet.Value) parquet.Value{},
 	}}
 }

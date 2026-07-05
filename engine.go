@@ -3,7 +3,9 @@ package lake
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
+	"hash/maphash"
 	"io"
 	"math/big"
 	"time"
@@ -24,18 +26,8 @@ type query struct {
 	ranges      map[string]catalog.Range
 	checks      map[string]func(parquet.Value) bool
 	limit       int // if set to -1 there is no limit
-	grouping    map[string]func(parquet.Value) (string, parquet.Value)
+	grouping    map[string]func(parquet.Value) (uint64, parquet.Value)
 	aggregators map[string]func([]parquet.Value) parquet.Value
-}
-
-type chunkKey struct {
-	hash  string
-	exact parquet.Value
-}
-
-type row struct {
-	group  []chunkKey
-	values []parquet.Value
 }
 
 // lookup uses the provided ranges and checks to efficiently find all matching rows.
@@ -106,20 +98,15 @@ func (b *Bucket) aggregate(ctx context.Context, schema *parquet.Schema, q *query
 	println("filtering: ", fmt.Sprint(time.Since(start)))
 	start = time.Now()
 
-	type group struct {
-		key  parquet.Value
-		rows big.Int
-	}
+	hashes := make([][]uint64, rows.BitLen())
+	keys := make([][]parquet.Value, rows.BitLen())
 
-	columnGroups := map[string]map[string]*group{}
 	for columnIdx, column := range rowGroup.Schema().Columns() {
 		columnName := column[0]
-		grouping, ok := q.grouping[columnName]
+		group, ok := q.grouping[columnName]
 		if !ok {
 			continue
 		}
-
-		groups := map[string]*group{}
 		chunk := rowGroup.ColumnChunks()[columnIdx]
 
 		pages := chunk.Pages()
@@ -147,38 +134,34 @@ func (b *Bucket) aggregate(ctx context.Context, schema *parquet.Schema, q *query
 				return nil, fmt.Errorf("failed to read rows: %v", err)
 			}
 			for valueIdx, value := range values[:n] {
-				if rows.Bit(int(firstPageRow)+valueIdx) == 0 {
+				rowIdx := int(firstPageRow) + valueIdx
+				if rows.Bit(rowIdx) == 0 {
 					continue
 				}
-				hash, key := grouping(value)
-				valueGroup, ok := groups[hash]
-				if !ok {
-					valueGroup = &group{key: key}
-					groups[hash] = valueGroup
-				}
-				valueGroup.rows.SetBit(&valueGroup.rows, int(firstPageRow)+valueIdx, 1)
+
+				hash, key := group(value)
+				hashes[rowIdx] = append(hashes[rowIdx], hash)
+				keys[rowIdx] = append(keys[rowIdx], key)
 			}
 		}
-		columnGroups[columnName] = groups
 	}
 
 	println("pre grouping: ", fmt.Sprint(time.Since(start)))
 	start = time.Now()
 
 	streams := newHashmap[big.Int]()
-	for row := range rows.BitLen() {
-		groupHash, groupKeys := "", []parquet.Value{}
-		for _, groups := range columnGroups {
-			for hash, group := range groups {
-				if group.rows.Bit(row) == 1 {
-					groupHash += hash
-					groupKeys = append(groupKeys, group.key)
-				}
-			}
+	for row, hash := range hashes {
+		streamHash, streamKey := maphash.Hash{}, keys[row]
+		streamHash.SetSeed(mapSeed)
+		for _, hash := range hash {
+			var buffer [8]byte
+			binary.LittleEndian.PutUint64(buffer[:], hash)
+			streamHash.Write(buffer[:])
 		}
-		stream, _ := streams.get(groupHash, groupKeys)
+		rawStreamHash := streamHash.Sum64()
+		stream, _ := streams.get(rawStreamHash, streamKey)
 		stream.SetBit(&stream, row, 1)
-		streams.set(groupHash, groupKeys, stream)
+		streams.set(rawStreamHash, streamKey, stream)
 	}
 
 	println("grouping: ", fmt.Sprint(time.Since(start)))

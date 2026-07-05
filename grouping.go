@@ -1,11 +1,15 @@
 package lake
 
 import (
+	"hash/maphash"
+
 	"github.com/parquet-go/parquet-go"
 )
 
-type Grouper func(parquet.Value) (string, parquet.Value)
+var mapSeed = maphash.MakeSeed()
 
-func Exact(value parquet.Value) (string, parquet.Value) {
-	return value.String(), value
+type Grouper func(parquet.Value) (uint64, parquet.Value)
+
+func Exact(value parquet.Value) (uint64, parquet.Value) {
+	return maphash.Bytes(mapSeed, value.Bytes()), value
 }
