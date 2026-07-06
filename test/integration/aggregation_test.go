@@ -112,9 +112,10 @@ func testAggregation(t *testing.T, bucket *lake.Bucket) {
 			Static:    800,                                 // should not do anything
 			ignore:    lake.FilterFloat(lake.Eq(1337.420)), // should not do anything
 		}).
+		Limit(100).
 		GroupBy(Request{
-			Endpoint:  lake.GroupString(lake.Exact),
-			Timestamp: lake.GroupInt(lake.Exact),
+			Endpoint: lake.GroupString(lake.Exact),
+			Latency:  lake.GroupInt(lake.Exact),
 		}).
 		Aggregate(Request{
 			Latency: lake.AggrInt(lake.Avg),

@@ -8,7 +8,6 @@ import (
 	"hash/maphash"
 	"io"
 	"math/big"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/megakuul/lakedb/catalog"
@@ -30,16 +29,56 @@ type query struct {
 	aggregators map[string]func([]parquet.Value) parquet.Value
 }
 
-// lookup uses the provided ranges and checks to efficiently find all matching rows.
-func (b *Bucket) aggregate(ctx context.Context, schema *parquet.Schema, q *query) ([]parquet.Row, error) {
-	start := time.Now()
+func (b *Bucket) process(ctx context.Context, schema *parquet.Schema, q *query) ([]parquet.Row, error) {
+	rowGroup, err := b.load(ctx, schema, q)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := b.filter(rowGroup, q)
+	if err != nil {
+		return nil, err
+	}
+
+	if q.limit > 0 {
+		var (
+			limitedRows big.Int
+			count       int
+		)
+		for row := range rows.BitLen() {
+			if rows.Bit(row) == 1 {
+				count++
+				if count > q.limit {
+					break
+				}
+				limitedRows.SetBit(&limitedRows, row, 1)
+			}
+		}
+		rows = &limitedRows
+	}
+
+	if len(q.aggregators) < 1 {
+		return b.extract(rowGroup, rows) // without aggregators just extract and return full rows.
+	}
+
+	streams := newHashmap[big.Int]()
+	if len(q.grouping) < 1 {
+		streams.set(0, nil, *rows)
+	} else {
+		streams, err = b.group(rowGroup, rows, q)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return b.aggregate(rowGroup, streams, q)
+}
+
+func (b *Bucket) load(ctx context.Context, schema *parquet.Schema, q *query) (parquet.RowGroup, error) {
 	b.catalogLock.RLock()
 	defer b.catalogLock.RUnlock()
 	table, ok := b.catalog.Tables[schema.Name()]
 	if !ok {
 		return nil, fmt.Errorf("table '%s' does not exist", schema.Name())
 	}
-
 	rowGroups := []parquet.RowGroup{}
 	for _, shard := range filterShards(table.Shards, q.ranges) {
 		result, err := b.client.GetObject(ctx, &s3.GetObjectInput{
@@ -64,10 +103,10 @@ func (b *Bucket) aggregate(ctx context.Context, schema *parquet.Schema, q *query
 	if err != nil {
 		return nil, fmt.Errorf("failed to merge row groups: %v", err)
 	}
+	return rowGroup, nil
+}
 
-	println("catalog, merge and from disk: ", fmt.Sprint(time.Since(start)))
-	start = time.Now()
-
+func (b *Bucket) filter(rowGroup parquet.RowGroup, q *query) (*big.Int, error) {
 	filterColumns, err := createFilterColumns(rowGroup.Schema(), q)
 	if err != nil {
 		return nil, err
@@ -75,7 +114,6 @@ func (b *Bucket) aggregate(ctx context.Context, schema *parquet.Schema, q *query
 
 	// rows is a bitset compressed '[]bool{}' that maps row positions to their "match" status.
 	var rows *big.Int
-
 	for i, filterColumn := range filterColumns {
 		chunk := rowGroup.ColumnChunks()[filterColumn.index]
 		var matches big.Int
@@ -94,10 +132,10 @@ func (b *Bucket) aggregate(ctx context.Context, schema *parquet.Schema, q *query
 			}
 		}
 	}
+	return rows, nil
+}
 
-	println("filtering: ", fmt.Sprint(time.Since(start)))
-	start = time.Now()
-
+func (b *Bucket) group(rowGroup parquet.RowGroup, rows *big.Int, q *query) (*hashmap[big.Int], error) {
 	hashes := make([][]uint64, rows.BitLen())
 	keys := make([][]parquet.Value, rows.BitLen())
 
@@ -146,9 +184,6 @@ func (b *Bucket) aggregate(ctx context.Context, schema *parquet.Schema, q *query
 		}
 	}
 
-	println("pre grouping: ", fmt.Sprint(time.Since(start)))
-	start = time.Now()
-
 	streams := newHashmap[big.Int]()
 	count := 0
 	for row, hash := range hashes {
@@ -172,10 +207,10 @@ func (b *Bucket) aggregate(ctx context.Context, schema *parquet.Schema, q *query
 		stream.SetBit(&stream, row, 1)
 		streams.set(rawStreamHash, streamKey, stream)
 	}
+	return streams, nil
+}
 
-	println("grouping: ", fmt.Sprint(time.Since(start)))
-	start = time.Now()
-
+func (b *Bucket) aggregate(rowGroup parquet.RowGroup, streams *hashmap[big.Int], q *query) ([]parquet.Row, error) {
 	results := []parquet.Row{}
 	for hash, keys := range streams.keys() {
 		rows, _ := streams.get(hash, keys)
@@ -226,79 +261,29 @@ func (b *Bucket) aggregate(ctx context.Context, schema *parquet.Schema, q *query
 
 		results = append(results, result)
 	}
-
-	println("aggregating: ", fmt.Sprint(time.Since(start)))
-	start = time.Now()
-
 	return results, nil
-	//
-	// groups := newHashmap[[][]parquet.Value]()
-	// for row, ok := range rows {
-	// 	if ok {
-	// 		continue
-	// 	}
-	// 	groupingHash, groupingChain := strings.Builder{}, []parquet.Value{}
-	// 	for _, chunkKey := range rows[i].group {
-	// 		groupingHash.WriteString(chunkKey.hash)
-	// 		groupingChain = append(groupingChain, chunkKey.exact)
-	// 	}
-	// 	columns, ok := groups.get(groupingHash.String(), groupingChain)
-	// 	if !ok {
-	// 		columns = make([][]parquet.Value, len(rowGroup.Schema().Columns()))
-	// 	}
-	// 	for _, value := range row.values {
-	// 		columns[value.Column()] = append(columns[value.Column()], value)
-	// 	}
-	// 	groups.set(groupingHash.String(), groupingChain, columns)
-	// }
-	// for hash, keyChain := range groups.keys() {
-	// 	columns, ok := groups.get(hash, keyChain)
-	// 	if !ok {
-	// 		continue
-	// 	}
-	// 	aggregated := make(parquet.Row, 0, len(columns))
-	// 	for column, values := range columns {
-	// 		columnName := rowGroup.Schema().Columns()[column][0]
-	// 		aggregate, ok := q.aggregators[columnName]
-	// 		if !ok {
-	// 			if group, ok := q.grouping[columnName]; ok {
-	// 				_, derived := group(values[0])
-	// 				aggregated = append(aggregated, derived)
-	// 			} else {
-	// 				aggregated = append(aggregated, parquet.NullValue())
-	// 			}
-	// 			continue
-	// 		}
-	// 		aggregated = append(aggregated, aggregate(values))
-	// 	}
-	// 	result = append(result, aggregated)
-	// }
-	//
-	// println("aggregating: ", fmt.Sprint(time.Since(start)))
-	// start = time.Now()
-	// return result, nil
 }
 
-func retrieve() {
-	// reader := rowGroup.Rows()
-	// defer reader.Close()
-	//
-	// result := make([]parquet.Row, 0)
-	// for i, row := range rows {
-	// 	if len(row.values) < 1 {
-	// 		continue
-	// 	}
-	// 	if err = reader.SeekToRow(int64(i)); err != nil {
-	// 		return nil, fmt.Errorf("failed to seek row: %v", err)
-	// 	}
-	// 	buffer := make([]parquet.Row, 1)
-	// 	_, err := reader.ReadRows(buffer)
-	// 	if err != nil && err != io.EOF {
-	// 		return nil, fmt.Errorf("failed to read rows: %v", err)
-	// 	}
-	// 	result = append(result, buffer...)
-	// }
-	// return result, nil
+func (b *Bucket) extract(rowGroup parquet.RowGroup, rows *big.Int) ([]parquet.Row, error) {
+	reader := rowGroup.Rows()
+	defer reader.Close()
+
+	result := make([]parquet.Row, 0)
+	for row := range rows.BitLen() {
+		if rows.Bit(row) == 0 {
+			continue
+		}
+		if err := reader.SeekToRow(int64(row)); err != nil {
+			return nil, fmt.Errorf("failed to seek row: %v", err)
+		}
+		buffer := make([]parquet.Row, 1)
+		_, err := reader.ReadRows(buffer)
+		if err != nil && err != io.EOF {
+			return nil, fmt.Errorf("failed to read rows: %v", err)
+		}
+		result = append(result, buffer...)
+	}
+	return result, nil
 }
 
 // scanChunk checks the boundary for each page and applies the filter to each row in matching pages.
