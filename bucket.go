@@ -22,10 +22,11 @@ import (
 )
 
 type Bucket struct {
-	client      *s3.Client
-	name        string
-	catalog     catalog.Catalog
-	catalogLock sync.RWMutex
+	client       *s3.Client
+	name         string
+	catalog      catalog.Catalog
+	catalogLock  sync.RWMutex
+	maxGroupRows int
 }
 
 type BucketOption func(*s3.Options)
@@ -79,8 +80,9 @@ func NewFromClient(ctx context.Context, client *s3.Client, bucket string) (*Buck
 			ETag:   nil,
 			Tables: map[string]catalog.Table{},
 		},
-		catalogLock: sync.RWMutex{},
-		client:      client,
+		catalogLock:  sync.RWMutex{},
+		client:       client,
+		maxGroupRows: 1000,
 	}
 	return b, b.loadCatalog(ctx)
 }

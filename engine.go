@@ -150,7 +150,16 @@ func (b *Bucket) aggregate(ctx context.Context, schema *parquet.Schema, q *query
 	start = time.Now()
 
 	streams := newHashmap[big.Int]()
+	count := 0
 	for row, hash := range hashes {
+		if rows.Bit(row) == 0 {
+			continue
+		}
+		count++
+		if count > b.maxGroupRows {
+			return nil, fmt.Errorf("maximum grouping size exceeded!")
+		}
+
 		streamHash, streamKey := maphash.Hash{}, keys[row]
 		streamHash.SetSeed(mapSeed)
 		for _, hash := range hash {

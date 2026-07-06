@@ -113,7 +113,8 @@ func testAggregation(t *testing.T, bucket *lake.Bucket) {
 			ignore:    lake.FilterFloat(lake.Eq(1337.420)), // should not do anything
 		}).
 		GroupBy(Request{
-			Endpoint: lake.GroupString(lake.Exact),
+			Endpoint:  lake.GroupString(lake.Exact),
+			Timestamp: lake.GroupInt(lake.Exact),
 		}).
 		Aggregate(Request{
 			Latency: lake.AggrInt(lake.Avg),
@@ -125,10 +126,10 @@ func testAggregation(t *testing.T, bucket *lake.Bucket) {
 	println("aggregate time: ", fmt.Sprint(time.Since(start)))
 
 	println(len(orderedByEndpoint))
-	for _, result := range orderedByEndpoint {
-		println(fmt.Sprint(result.Endpoint.Data))
-		println(fmt.Sprint(result.Latency.Data))
-	}
+	// for _, result := range orderedByEndpoint {
+	// 	println(fmt.Sprint(result.Endpoint.Data))
+	// 	println(fmt.Sprint(result.Latency.Data))
+	// }
 	// assert
 	// if orderedByService[0].Latency.Data != ironcladLatencies {
 	// 	t.Fatalf("filter operation did not work properly; expected '4' got '%d'", len(logsBeforeIncident))
