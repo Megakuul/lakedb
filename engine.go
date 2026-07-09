@@ -14,13 +14,6 @@ import (
 	"github.com/parquet-go/parquet-go"
 )
 
-// query is the internal api between the engine and the querybuilder.
-// it defines all query stages:
-// 1. range filters (compares numeral or alphabetical ranges against the catalog / parquet statistics)
-// 2. check filters (perform exact fine grained filtering on values that passed the range filter).
-// 3. limit applies to stop the filtering process.
-// 4. grouping (uses fine grained filters to group rows into one or more "windows" (by default just one global window))
-// 5. aggregators (takes the grouped "windows" and applies aggregation to each column to collapse the grouped rows)
 type query struct {
 	ranges      map[string]catalog.Range
 	checks      map[string]func(parquet.Value) bool
@@ -118,7 +111,7 @@ func (b *Bucket) load(ctx context.Context, schema *parquet.Schema, sort bool, q 
 	}
 	rowGroup, err := parquet.MergeRowGroups(rowGroups, options...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to merge row groups: %v", err)
+		return nil, fmt.Errorf("merge shards: %v", err)
 	}
 	return rowGroup, nil
 }

@@ -21,7 +21,6 @@ type Compactor[T any] struct {
 	sorting []parquet.SortingColumn
 	minSize int
 	bucket  *Bucket
-	ranges  map[string]catalog.Range
 }
 
 func NewCompactor[T any](bucket *Bucket, minSize int) *Compactor[T] {
@@ -31,7 +30,6 @@ func NewCompactor[T any](bucket *Bucket, minSize int) *Compactor[T] {
 		sorting: tableSorting,
 		minSize: minSize,
 		bucket:  bucket,
-		ranges:  map[string]catalog.Range{},
 	}
 }
 
@@ -48,54 +46,12 @@ func (c *Compactor[T]) Compact(ctx context.Context) error {
 		table := ref.Tables[c.table]
 		schema := parquet.NewSchema(c.table, parquet.SchemaOf(*new(T)))
 
-		batchSize := 0
 		rowGroups := []parquet.RowGroup{}
-		ranges := map[string]catalog.Range{}
-
 		for i, shard := range table.Shards {
 			if shard.Size > c.minSize {
 				continue
-			} else if batchSize > c.minSize {
-				break // as soon as all shards to process generate a new shard that is > c.minSize we process.
 			}
 			compactableShards[i] = shard
-			batchSize += shard.Size
-			for column, columnRange := range shard.Ranges {
-				currentRange, ok := ranges[column]
-				if !ok {
-					currentRange = columnRange
-					continue
-				}
-				switch currentMin := currentRange.Min.(type) {
-				case int64:
-					if shardMin, ok := columnRange.Min.(int64); !ok || shardMin < currentMin {
-						currentRange.Min = columnRange.Min
-					}
-				case float64:
-					if shardMin, ok := columnRange.Min.(float64); !ok || shardMin < currentMin {
-						currentRange.Min = columnRange.Min
-					}
-				case string:
-					if shardMin, ok := columnRange.Min.(string); !ok || shardMin < currentMin {
-						currentRange.Min = columnRange.Min
-					}
-				}
-				switch currentMax := currentRange.Max.(type) {
-				case int64:
-					if shardMax, ok := columnRange.Max.(int64); !ok || shardMax > currentMax {
-						currentRange.Max = columnRange.Max
-					}
-				case float64:
-					if shardMax, ok := columnRange.Max.(float64); !ok || shardMax > currentMax {
-						currentRange.Max = columnRange.Max
-					}
-				case string:
-					if shardMax, ok := columnRange.Max.(string); !ok || shardMax > currentMax {
-						currentRange.Max = columnRange.Max
-					}
-				}
-				ranges[column] = currentRange
-			}
 		}
 
 		for _, shard := range compactableShards {
@@ -118,32 +74,13 @@ func (c *Compactor[T]) Compact(ctx context.Context) error {
 			rowGroups = append(rowGroups, file.RowGroups()...)
 		}
 		rowGroup, err := parquet.MergeRowGroups(rowGroups, schema, parquet.SortingRowGroupConfig(parquet.SortingColumns(c.sorting...)))
-
-		buffer := bytes.NewBuffer(nil)
-		writer := parquet.NewGenericWriter[T](buffer)
-		_, err = parquet.CopyRows(writer, rowGroup.Rows())
 		if err != nil {
-			return fmt.Errorf("failed to flush parquet buffer: %v", err)
-		}
-		if err := writer.Close(); err != nil {
-			return fmt.Errorf("failed to flush parquet writer: %v", err)
+			return fmt.Errorf("merge shards: %v", err)
 		}
 
-		target := path.Join(c.table, uuid.New().String()+".parquet")
-		_, err = c.bucket.client.PutObject(ctx, &s3.PutObjectInput{
-			Bucket:      &c.bucket.name,
-			Key:         &target,
-			IfNoneMatch: new("*"),
-			Body:        buffer,
-		})
-		if err != nil {
-			return err
-		}
-		shard := catalog.Shard{
-			Size:   buffer.Len(),
-			Target: target,
-			// Ranges: ranges,
-		}
+		reader := rowGroup.Rows()
+		defer reader.Close()
+
 		newShards := make([]catalog.Shard, 0, len(table.Shards))
 		for i, shard := range table.Shards {
 			if _, ok := compactableShards[i]; ok {
@@ -151,7 +88,52 @@ func (c *Compactor[T]) Compact(ctx context.Context) error {
 			}
 			newShards = append(newShards, shard)
 		}
-		newShards = append(newShards, shard)
+		proceed := true
+		for proceed {
+			buffer := bytes.NewBuffer(nil)
+			writer := parquet.NewGenericWriter[T](buffer, parquet.SortingWriterConfig(parquet.SortingColumns(c.sorting...)))
+			for proceed && writer.Size() < int64(c.minSize) {
+				rowBuffer := make([]parquet.Row, 1000)
+				n, err := reader.ReadRows(rowBuffer)
+				if err != nil {
+					if errors.Is(err, io.EOF) {
+						proceed = false
+					} else {
+						return fmt.Errorf("failed to read parquet row batch: %v", err)
+					}
+				}
+				_, err = writer.WriteRows(rowBuffer[:n])
+				if err != nil {
+					return fmt.Errorf("failed to write parquet row batch: %v", err)
+				}
+			}
+			if err := writer.Close(); err != nil {
+				return fmt.Errorf("failed to flush parquet writer: %v", err)
+			}
+			ranges, err := extractRanges(schema, writer.File().Metadata().RowGroups)
+			if err != nil {
+				return fmt.Errorf("extracting ranges: %v", err)
+			}
+
+			shardSize := buffer.Len()
+			target := path.Join(c.table, uuid.New().String()+".parquet")
+			_, err = c.bucket.client.PutObject(ctx, &s3.PutObjectInput{
+				Bucket:      &c.bucket.name,
+				Key:         &target,
+				IfNoneMatch: new("*"),
+				Body:        buffer,
+			})
+			if err != nil {
+				return err
+			}
+			shard := catalog.Shard{
+				Size:   shardSize,
+				Target: target,
+				Ranges: ranges,
+			}
+			newShards = append(newShards, shard)
+		}
+
 		table.Shards = newShards
 		ref.Tables[c.table] = table
 		return nil
