@@ -33,7 +33,7 @@ func NewIngestor[T any](bucket *Bucket) *Ingestor[T] {
 	}
 }
 
-// insert writes the provided parquet row to the processor. This does NOT write anything to disk.
+// Insert writes the provided parquet row to the processor. This does NOT write anything to disk.
 func (i *Ingestor[T]) Insert(rows ...T) error {
 	_, err := i.writer.Write(rows)
 	return err

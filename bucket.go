@@ -29,7 +29,7 @@ type Bucket struct {
 	maxGroupRows         int
 }
 
-type BucketOption func(*s3.Options)
+type BucketOption func(*Bucket, *s3.Options)
 
 // New constructs a lakedb bucket pointing to the provided s3 url / bucket.
 // Credentials are loaded with aws sdk (e.g. from env AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY).
@@ -48,31 +48,35 @@ func New(ctx context.Context, url, bucket string, opts ...BucketOption) (*Bucket
 		o.BaseEndpoint = new(url)
 		o.UsePathStyle = true
 		for _, opt := range opts {
-			opt(o)
+			opt(nil, o)
 		}
 	})
 
-	return NewFromClient(ctx, client, bucket)
+	return NewFromClient(ctx, client, bucket, opts...)
 }
 
 // WithCredentials specifies a static access and secret key.
 // This disables the default AWS SDK credential process.
 func WithCredentials(accessKey, secretKey string) BucketOption {
-	return func(o *s3.Options) {
-		o.Credentials = credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")
+	return func(b *Bucket, o *s3.Options) {
+		if o != nil {
+			o.Credentials = credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")
+		}
 	}
 }
 
 // WithRegion specifies a static bucket region.
 // This disables the default AWS SDK region process.
 func WithRegion(region string) BucketOption {
-	return func(o *s3.Options) {
-		o.Region = region
+	return func(b *Bucket, o *s3.Options) {
+		if o != nil {
+			o.Region = region
+		}
 	}
 }
 
 // NewFromClient initializes a dynamitedb bucket from an existing aws s3 sdk client.
-func NewFromClient(ctx context.Context, client *s3.Client, bucket string) (*Bucket, error) {
+func NewFromClient(ctx context.Context, client *s3.Client, bucket string, opts ...BucketOption) (*Bucket, error) {
 	b := &Bucket{
 		name: bucket,
 		catalog: catalog.Catalog{
@@ -85,9 +89,23 @@ func NewFromClient(ctx context.Context, client *s3.Client, bucket string) (*Buck
 		catalogCacheDuration: time.Minute,
 		maxGroupRows:         1000,
 	}
+	for _, opt := range opts {
+		opt(b, nil)
+	}
 	return b, b.loadCatalog(ctx)
 }
 
+// WithMaxGroups specifies the maximum number of dynamically aggregated groups before the engine cancels.
+// This limit exists because lakedbs engine starts consuming excessive amounts of memory on high cardinality groups.
+func WithMaxGroups(groups int) BucketOption {
+	return func(b *Bucket, o *s3.Options) {
+		if b != nil {
+			b.maxGroupRows = groups
+		}
+	}
+}
+
+// write writes the provided data / range to the underlying storage engine.
 func (b *Bucket) write(ctx context.Context, tableName string, data []byte, ranges map[string]catalog.Range) error {
 	target := path.Join(tableName, uuid.New().String()+".parquet")
 	_, err := b.client.PutObject(ctx, &s3.PutObjectInput{

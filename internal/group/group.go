@@ -1,4 +1,4 @@
-// group implements utils to manage groups.
+// Package group implements utils to manage groups.
 // A group is defined as a combination of all grouped by values in a single row (e.g. GROUP BY name,age means group is "linus,20").
 // Because a group is not uniquely serializable (it can be a composite of multiple datatypes),
 // this package implements a hashmap that maps such a group combination to a bitset of rows that are part of it.

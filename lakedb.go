@@ -1,3 +1,4 @@
+// Package lakedb is a simple realtime analytics engine running on s3 with parquet.
 package lake
 
 import (

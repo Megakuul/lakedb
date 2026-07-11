@@ -217,7 +217,7 @@ func (b *Bucket) group(rowGroup parquet.RowGroup, rows *big.Int, q *query) (*gro
 		if !ok {
 			count++
 			if count > b.maxGroupRows {
-				return nil, fmt.Errorf("maximum grouping size exceeded!")
+				return nil, fmt.Errorf("maximum grouping size exceeded")
 			}
 			groups.Set(keys, group)
 		}

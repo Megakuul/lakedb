@@ -1,4 +1,4 @@
-// package catalog contains the structure of the lakedb index catalog format.
+// Package catalog contains the structure of the lakedb index catalog format.
 // The catalog serves as metadata to avoid hive partitioning which is not atomic and expensive due to ListBucket requests.
 // Abstracted into its own package to avoid top level bloat (rarely used by end users).
 package catalog
