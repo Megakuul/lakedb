@@ -43,7 +43,7 @@ func testFilter(t *testing.T, bucket *lake.Bucket) {
 	ingestorB.Insert(t.Context(), Log{
 		Timestamp:  lake.NewInt(now.Unix() + 1),
 		Service:    lake.NewString("elephant"),
-		Importance: lake.NewFloat(20),
+		Importance: lake.NewFloat(20.0),
 		Message:    lake.NewString("we caught him, however, now he is eating the control panel"),
 	})
 	// dump some garbage data inbetween
@@ -51,14 +51,14 @@ func testFilter(t *testing.T, bucket *lake.Bucket) {
 		ingestorB.Insert(t.Context(), Log{
 			Timestamp:  lake.NewInt(50 + i),
 			Service:    lake.NewString("elephantor"),
-			Importance: lake.NewFloat(0),
+			Importance: lake.NewFloat(0.0),
 			Message:    lake.NewString("GARBAGGEEGGEGEG"),
 		})
 	}
 	ingestorA.Insert(t.Context(), Log{
 		Timestamp:  lake.NewInt(now.Unix() + 2),
 		Service:    lake.NewString("camera"),
-		Importance: lake.NewFloat(50),
+		Importance: lake.NewFloat(50.0),
 		Message:    lake.NewString("I detected an elephant in the room"),
 	})
 	// dump some garbage data inbetween
@@ -66,7 +66,7 @@ func testFilter(t *testing.T, bucket *lake.Bucket) {
 		ingestorA.Insert(t.Context(), Log{
 			Timestamp:  lake.NewInt(50 + i),
 			Service:    lake.NewString("elephantor"),
-			Importance: lake.NewFloat(0),
+			Importance: lake.NewFloat(0.0),
 			Message:    lake.NewString("GARBAGGEEGGEGEG"),
 		})
 	}
