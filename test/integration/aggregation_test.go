@@ -26,7 +26,7 @@ func testAggregation(t *testing.T, bucket *lake.Bucket) {
 	now := time.Now()
 	// prepare
 	ingestorA, ingestorB := lake.NewIngestor[Request](bucket), lake.NewIngestor[Request](bucket)
-	ingestorA.Insert(Request{
+	ingestorA.Insert(t.Context(), Request{
 		Timestamp:   lake.NewInt(now.Unix()),
 		Latency:     lake.NewInt(elephantLatencies[0]),
 		Endpoint:    lake.NewString("elephant"),
@@ -34,13 +34,13 @@ func testAggregation(t *testing.T, bucket *lake.Bucket) {
 		ignore:      lake.NewFloat(187.0),
 		Static:      420,
 	})
-	ingestorB.Insert(Request{
+	ingestorB.Insert(t.Context(), Request{
 		Timestamp:   lake.NewInt(now.Unix() + 1),
 		Latency:     lake.NewInt(elephantLatencies[1]),
 		Endpoint:    lake.NewString("elephant"),
 		RequestorIQ: lake.NewFloat(requestorIq[1]),
 	})
-	ingestorB.Insert(Request{
+	ingestorB.Insert(t.Context(), Request{
 		Timestamp:   lake.NewInt(now.Unix() + 2),
 		Latency:     lake.NewInt(ironcladLatencies[0]),
 		Endpoint:    lake.NewString("ironclad"),
@@ -48,7 +48,7 @@ func testAggregation(t *testing.T, bucket *lake.Bucket) {
 		ignore:      lake.NewFloat(187.0),
 		Static:      420,
 	})
-	ingestorA.Insert(Request{
+	ingestorA.Insert(t.Context(), Request{
 		Timestamp:   lake.NewInt(now.Unix() + 2),
 		Latency:     lake.NewInt(ironcladLatencies[1]),
 		Endpoint:    lake.NewString("ironclad"),
@@ -59,14 +59,14 @@ func testAggregation(t *testing.T, bucket *lake.Bucket) {
 		generatedIroncladLatency = append(generatedIroncladLatency, i)
 		generatedRequestorIq = append(generatedRequestorIq, float64(i)*0.3)
 		if i%2 == 0 {
-			ingestorB.Insert(Request{
+			ingestorB.Insert(t.Context(), Request{
 				Timestamp:   lake.NewInt(now.Add(time.Hour).Unix() + i),
 				Latency:     lake.NewInt(generatedIroncladLatency[i]),
 				Endpoint:    lake.NewString("ironclad"),
 				RequestorIQ: lake.NewFloat(generatedRequestorIq[i]),
 			})
 		} else {
-			ingestorA.Insert(Request{
+			ingestorA.Insert(t.Context(), Request{
 				Timestamp:   lake.NewInt(now.Add(time.Hour).Unix() + i),
 				Latency:     lake.NewInt(generatedIroncladLatency[i]),
 				Endpoint:    lake.NewString("ironclad"),
@@ -74,13 +74,13 @@ func testAggregation(t *testing.T, bucket *lake.Bucket) {
 			})
 		}
 	}
-	ingestorB.Insert(Request{
+	ingestorB.Insert(t.Context(), Request{
 		Timestamp:   lake.NewInt(now.Unix() + 2),
 		Latency:     lake.NewInt(elephantLatencies[2]),
 		Endpoint:    lake.NewString("elephant"),
 		RequestorIQ: lake.NewFloat(requestorIq[4]),
 	})
-	ingestorA.Insert(Request{
+	ingestorA.Insert(t.Context(), Request{
 		Timestamp:   lake.NewInt(now.Unix() + 7),
 		Latency:     lake.NewInt(ironcladLatencies[2]),
 		Endpoint:    lake.NewString("ironclad"),

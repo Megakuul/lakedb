@@ -31,14 +31,14 @@ func testCompaction(t *testing.T, bucket *lake.Bucket) {
 		lake.NewIngestor[GameStatistic](bucket),
 		lake.NewIngestor[GameStatistic](bucket),
 	}
-	ingestors[1].Insert(GameStatistic{
+	ingestors[1].Insert(t.Context(), GameStatistic{
 		GameID:      lake.NewString(weakestGame),
 		Player:      lake.NewString("The Rizzler"),
 		Performance: lake.NewFloat(-67),
 		Hits:        lake.NewInt(-67),
 		Accuracy:    lake.NewFloat(-0.69),
 	})
-	ingestors[2].Insert(GameStatistic{
+	ingestors[2].Insert(t.Context(), GameStatistic{
 		GameID:      lake.NewString(bestGame),
 		Player:      lake.NewString("John fucking Cena"),
 		Performance: lake.NewFloat(99999999),
@@ -47,7 +47,7 @@ func testCompaction(t *testing.T, bucket *lake.Bucket) {
 	})
 	for ingestorIdx, ingestor := range ingestors {
 		for i := range 10000 {
-			ingestor.Insert(GameStatistic{
+			ingestor.Insert(t.Context(), GameStatistic{
 				GameID:      lake.NewString(uuid.NewString()),
 				Player:      lake.NewString(fmt.Sprintf("Big Baba %d %d", ingestorIdx, i)),
 				Performance: lake.NewFloat(float64(i)),
@@ -61,7 +61,7 @@ func testCompaction(t *testing.T, bucket *lake.Bucket) {
 	}
 
 	// act
-	compactor := lake.NewCompactor[GameStatistic](bucket, 128_000_000)
+	compactor := lake.NewCompactor[GameStatistic](bucket)
 	if err := compactor.Compact(t.Context()); err != nil {
 		t.Fatal(err)
 	}

@@ -23,25 +23,25 @@ func testSorting(t *testing.T, bucket *lake.Bucket) {
 	// prepare
 	bestRehabilitation, weakestRehabilitation := uuid.NewString(), uuid.NewString()
 	ingestorA, ingestorB := lake.NewIngestor[RehabilitationStatistic](bucket), lake.NewIngestor[RehabilitationStatistic](bucket)
-	ingestorA.Insert(RehabilitationStatistic{
+	ingestorA.Insert(t.Context(), RehabilitationStatistic{
 		RehabilitationID: lake.NewString(weakestRehabilitation),
 		Player:           lake.NewString("Tylenol Jones"),
 		Performance:      lake.NewFloat(1.54),
 		Points:           lake.NewInt(380),
 	})
-	ingestorB.Insert(RehabilitationStatistic{
+	ingestorB.Insert(t.Context(), RehabilitationStatistic{
 		RehabilitationID: lake.NewString(uuid.New().String()),
 		Player:           lake.NewString("Beef Supreme"),
 		Performance:      lake.NewFloat(1.87),
 		Points:           lake.NewInt(420),
 	})
-	ingestorA.Insert(RehabilitationStatistic{
+	ingestorA.Insert(t.Context(), RehabilitationStatistic{
 		RehabilitationID: lake.NewString(bestRehabilitation),
 		Player:           lake.NewString("Tylenol Jones"),
 		Performance:      lake.NewFloat(1.87),
 		Points:           lake.NewInt(400),
 	})
-	ingestorB.Insert(RehabilitationStatistic{
+	ingestorB.Insert(t.Context(), RehabilitationStatistic{
 		RehabilitationID: lake.NewString(uuid.New().String()),
 		Player:           lake.NewString("Beef Supreme"),
 		Performance:      lake.NewFloat(1.54),

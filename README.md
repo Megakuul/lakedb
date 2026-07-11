@@ -7,6 +7,26 @@ LakeDB is a simple realtime analytics engine running on s3 using parquet.
 
 ```
 
+## Ingestion
+
+```go
+
+```
+
+> [!TIP]
+> It is absolutely permitted and often required to commit only a *few* ingested entries (e.g. in serverless scenarios or to make the data available quickly).
+> To avoid "paruqet-file-churn" on the long run, use the compactor in the next section to compact the emitted files into large parquet chunks.
+
+## Compaction
+
+```go
+
+```
+
+> [!NOTE]
+> Compaction and ingestion operations are fully atomic usign optimistic locking.
+> You will receive a `lake.ErrOptimisticLock` in case the lock is interrupted.
+
 ## Limitations
 
 > [!WARNING]

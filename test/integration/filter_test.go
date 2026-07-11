@@ -32,7 +32,7 @@ func testFilter(t *testing.T, bucket *lake.Bucket) {
 	now := time.Now()
 	// prepare
 	ingestorA, ingestorB := lake.NewIngestor[Log](bucket), lake.NewIngestor[Log](bucket)
-	ingestorA.Insert(Log{
+	ingestorA.Insert(t.Context(), Log{
 		Timestamp:  lake.NewInt(now.Unix()),
 		Service:    lake.NewString("elephant"),
 		Importance: lake.NewFloat(99.9),
@@ -40,7 +40,7 @@ func testFilter(t *testing.T, bucket *lake.Bucket) {
 		ignore:     lake.NewFloat(187.0),
 		Static:     420,
 	})
-	ingestorB.Insert(Log{
+	ingestorB.Insert(t.Context(), Log{
 		Timestamp:  lake.NewInt(now.Unix() + 1),
 		Service:    lake.NewString("elephant"),
 		Importance: lake.NewFloat(20),
@@ -48,14 +48,14 @@ func testFilter(t *testing.T, bucket *lake.Bucket) {
 	})
 	// dump some garbage data inbetween
 	for i := range int64(50000) {
-		ingestorB.Insert(Log{
+		ingestorB.Insert(t.Context(), Log{
 			Timestamp:  lake.NewInt(50 + i),
 			Service:    lake.NewString("elephantor"),
 			Importance: lake.NewFloat(0),
 			Message:    lake.NewString("GARBAGGEEGGEGEG"),
 		})
 	}
-	ingestorA.Insert(Log{
+	ingestorA.Insert(t.Context(), Log{
 		Timestamp:  lake.NewInt(now.Unix() + 2),
 		Service:    lake.NewString("camera"),
 		Importance: lake.NewFloat(50),
@@ -63,19 +63,19 @@ func testFilter(t *testing.T, bucket *lake.Bucket) {
 	})
 	// dump some garbage data inbetween
 	for i := range int64(50000) {
-		ingestorA.Insert(Log{
+		ingestorA.Insert(t.Context(), Log{
 			Timestamp:  lake.NewInt(50 + i),
 			Service:    lake.NewString("elephantor"),
 			Importance: lake.NewFloat(0),
 			Message:    lake.NewString("GARBAGGEEGGEGEG"),
 		})
 	}
-	ingestorB.Insert(Log{
+	ingestorB.Insert(t.Context(), Log{
 		Timestamp:  lake.NewInt(now.Unix() + 3),
 		Importance: lake.NewFloat(1.0),
 		Message:    lake.NewString("wait guys this is my first day... what should I do here?"),
 	})
-	ingestorA.Insert(Log{
+	ingestorA.Insert(t.Context(), Log{
 		Timestamp:  lake.NewInt(now.Add(time.Hour).Unix()),
 		Service:    lake.NewString("camera"),
 		Importance: lake.NewFloat(13.37),

@@ -55,8 +55,7 @@ func (c *Compactor[T]) Compact(ctx context.Context) error {
 	}
 
 	compactableShards := map[int]catalog.Shard{}
-
-	err := c.bucket.commitCatalog(ctx, func(ref *catalog.Catalog) error {
+	compaction := func(ref *catalog.Catalog) error {
 		table := ref.Tables[c.table]
 		schema := parquet.NewSchema(c.table, parquet.SchemaOf(*new(T)))
 
@@ -151,7 +150,9 @@ func (c *Compactor[T]) Compact(ctx context.Context) error {
 		table.Shards = newShards
 		ref.Tables[c.table] = table
 		return nil
-	})
+	}
+
+	err := c.bucket.commitCatalog(ctx, compaction)
 	if err != nil {
 		return fmt.Errorf("compaction: %w", err)
 	}
