@@ -1,7 +1,6 @@
 package integration
 
 import (
-	"fmt"
 	"testing"
 	"time"
 
@@ -94,8 +93,7 @@ func testAggregation(t *testing.T, bucket *lake.Bucket) {
 		t.Fatal(err)
 	}
 
-	start := time.Now()
-	// execute
+	// act
 	orderedByEndpoint, err := lake.Query[Request]().
 		Where(Request{
 			Timestamp: lake.FilterInt(lake.After(now.Add(-time.Second))),
@@ -114,7 +112,6 @@ func testAggregation(t *testing.T, bucket *lake.Bucket) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	println("aggregate time: ", fmt.Sprint(time.Since(start)))
 
 	// assert
 	if len(orderedByEndpoint) != 2 {
@@ -148,13 +145,4 @@ func testAggregation(t *testing.T, bucket *lake.Bucket) {
 			t.Fatalf("unexpected endpoint in returned row result")
 		}
 	}
-	println(len(orderedByEndpoint))
-	// for _, result := range orderedByEndpoint {
-	// 	println(fmt.Sprint(result.Endpoint.Data))
-	// 	println(fmt.Sprint(result.Latency.Data))
-	// }
-	// assert
-	// if orderedByService[0].Latency.Data != ironcladLatencies {
-	// 	t.Fatalf("filter operation did not work properly; expected '4' got '%d'", len(logsBeforeIncident))
-	// }
 }

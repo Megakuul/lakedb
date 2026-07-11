@@ -65,9 +65,6 @@ func extractRanges(schema *parquet.Schema, rowGroups thrift.Slice[format.RowGrou
 
 			stats := chunk.MetaData.Statistics
 
-			if len(stats.MinValue) < 1 || len(stats.MaxValue) < 1 {
-				return nil, fmt.Errorf("invalid row group: min / max value statistics not set")
-			}
 			max := kind.Value(stats.MaxValue)
 			switch max.Kind() {
 			case parquet.Int64:

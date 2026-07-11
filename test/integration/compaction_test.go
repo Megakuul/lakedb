@@ -38,15 +38,15 @@ func testCompaction(t *testing.T, bucket *lake.Bucket) {
 		Hits:        lake.NewInt(-67),
 		Accuracy:    lake.NewFloat(-0.69),
 	})
-	ingestors[3].Insert(GameStatistic{
+	ingestors[2].Insert(GameStatistic{
 		GameID:      lake.NewString(bestGame),
 		Player:      lake.NewString("John fucking Cena"),
-		Performance: lake.NewFloat(200),
+		Performance: lake.NewFloat(99999999),
 		Hits:        lake.NewInt(math.MaxInt),
 		Accuracy:    lake.NewFloat(999999.9999),
 	})
 	for ingestorIdx, ingestor := range ingestors {
-		for i := range 2 {
+		for i := range 10000 {
 			ingestor.Insert(GameStatistic{
 				GameID:      lake.NewString(uuid.NewString()),
 				Player:      lake.NewString(fmt.Sprintf("Big Baba %d %d", ingestorIdx, i)),
@@ -71,15 +71,8 @@ func testCompaction(t *testing.T, bucket *lake.Bucket) {
 		t.Fatal(err)
 	}
 
-	println(games[0].Performance.Data)
-	println(games[len(games)-1].Performance.Data)
-	for row, game := range games {
-		if game.GameID.Data == bestGame {
-			println("game on row", row)
-		}
-	}
 	// assert
-	if len(games) != 4*100000+2 {
+	if len(games) != 4*10000+2 {
 		t.Fatalf("invalid compaction (entries lost or duplicated in process)")
 	}
 	if games[0].GameID.Data != bestGame {

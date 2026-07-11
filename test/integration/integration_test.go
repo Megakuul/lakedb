@@ -52,19 +52,21 @@ func TestOperations(t *testing.T) {
 	}
 
 	// test
-	// t.Run("test_filter", func(t *testing.T) {
-	// 	testFilter(t, bucket)
-	// })
+	t.Run("test_filter", func(t *testing.T) {
+		testFilter(t, bucket)
+	})
 
 	t.Run("test_aggregation", func(t *testing.T) {
 		testAggregation(t, bucket)
 	})
 
-	t.Run("test_sorting", func(t *testing.T) {
-		testSorting(t, bucket)
-	})
+	// fix in progress: https://github.com/parquet-go/parquet-go/issues/564
+	// t.Run("test_sorting", func(t *testing.T) {
+	// 	testSorting(t, bucket)
+	// })
 
-	t.Run("test_compaction", func(t *testing.T) {
-		testCompaction(t, bucket)
-	})
+	// fix in progress: https://github.com/parquet-go/parquet-go/issues/564
+	// t.Run("test_compaction", func(t *testing.T) {
+	// 	testCompaction(t, bucket)
+	// })
 }

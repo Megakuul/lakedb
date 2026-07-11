@@ -90,7 +90,7 @@ func testFilter(t *testing.T, bucket *lake.Bucket) {
 		t.Fatal(err)
 	}
 
-	// execute
+	// act
 	logsBeforeIncident, err := lake.Query[Log]().
 		Where(Log{
 			Timestamp: lake.FilterInt(lake.After(now.Add(-time.Second)), lake.Before(now.Add(time.Minute))),

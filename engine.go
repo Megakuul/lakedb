@@ -299,11 +299,11 @@ func (b *Bucket) extract(rowGroup parquet.RowGroup, rows *big.Int) ([]parquet.Ro
 			return nil, fmt.Errorf("failed to seek row: %v", err)
 		}
 		buffer := make([]parquet.Row, 1)
-		_, err := reader.ReadRows(buffer)
+		n, err := reader.ReadRows(buffer)
 		if err != nil && err != io.EOF {
 			return nil, fmt.Errorf("failed to read rows: %v", err)
 		}
-		result = append(result, buffer...)
+		result = append(result, buffer[:n]...)
 	}
 	return result, nil
 }

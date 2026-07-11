@@ -1,0 +1,44 @@
+# yaml-language-server: $schema=https://www.schemastore.org/github-workflow.json
+name: release_version
+on:
+  push:
+    branches:
+      - main
+jobs:
+  release_version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v6
+      - name: setup go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "go.mod"
+      - name: run linter
+        run: |
+          go vet ./...
+      - name: run staticcheck
+        uses: dominikh/staticcheck-action@v1
+        with:
+          version: "2026.1"
+          checks: "all,-U1000"
+      - name: run unit tests
+        run: |
+          go test .
+      - name: run integration tests
+        run: |
+          go test ./test/integration
+      - name: increase version and push tag
+        id: tag_version
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }} # need write permissions to tag repo
+          default_bump: false
+      - name: create release
+        if: ${{ steps.tag_version.outputs.release_type }}
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          tag_name: ${{ steps.tag_version.outputs.new_tag }}
