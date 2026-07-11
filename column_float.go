@@ -18,8 +18,8 @@ type Float struct {
 	Data       float64 `parquet:"data"`
 }
 
-func NewFloat(value float64) Float {
-	return Float{Data: value}
+func NewFloat[T ~float64](value T) Float {
+	return Float{Data: float64(value)}
 }
 
 func GroupFloat(grouper Grouper) Float {

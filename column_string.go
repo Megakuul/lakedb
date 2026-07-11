@@ -16,8 +16,8 @@ type String struct {
 	Data    string `parquet:"data"`
 }
 
-func NewString(value string) String {
-	return String{Data: value}
+func NewString[T ~string](value T) String {
+	return String{Data: string(value)}
 }
 
 func GroupString(grouper Grouper) String {

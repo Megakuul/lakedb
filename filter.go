@@ -5,13 +5,13 @@ import (
 	"time"
 )
 
-type Filter[T int64 | float64 | string] struct {
+type Filter[T ~float64 | ~int64 | ~string] struct {
 	max, min *T
 	check    func(T) bool
 }
 
 // Eq checks for an exact match on the property.
-func Eq[T float64 | int64 | string](operand T) Filter[T] {
+func Eq[T ~float64 | ~int64 | ~string](operand T) Filter[T] {
 	return Filter[T]{
 		check: func(left T) bool {
 			return left == operand
@@ -20,7 +20,7 @@ func Eq[T float64 | int64 | string](operand T) Filter[T] {
 }
 
 // In checks if one of the provided operands matches the row value.
-func In[T float64 | int64 | string](operands ...T) Filter[T] {
+func In[T ~float64 | ~int64 | ~string](operands ...T) Filter[T] {
 	return Filter[T]{
 		check: func(left T) bool {
 			return slices.Contains(operands, left)
@@ -51,7 +51,7 @@ func After(operand time.Time) Filter[int64] {
 }
 
 // Gte checks if the operand is greater or equals than the row value.
-func Gte[T float64 | int64 | string](operand T) Filter[T] {
+func Gte[T ~float64 | ~int64 | ~string](operand T) Filter[T] {
 	return Filter[T]{
 		max: nil,
 		min: &operand,
@@ -62,7 +62,7 @@ func Gte[T float64 | int64 | string](operand T) Filter[T] {
 }
 
 // Gt checks if the operand is greater than the row value.
-func Gt[T float64 | int64 | string](operand T) Filter[T] {
+func Gt[T ~float64 | ~int64 | ~string](operand T) Filter[T] {
 	return Filter[T]{
 		max: nil,
 		min: &operand,
@@ -73,7 +73,7 @@ func Gt[T float64 | int64 | string](operand T) Filter[T] {
 }
 
 // Lte checks if the operand is less or equals than the row value.
-func Lte[T float64 | int64 | string](operand T) Filter[T] {
+func Lte[T ~float64 | ~int64 | ~string](operand T) Filter[T] {
 	return Filter[T]{
 		max: nil,
 		min: &operand,
@@ -84,7 +84,7 @@ func Lte[T float64 | int64 | string](operand T) Filter[T] {
 }
 
 // Lt checks if the operand is less than the row value.
-func Lt[T float64 | int64 | string](operand T) Filter[T] {
+func Lt[T ~float64 | ~int64 | ~string](operand T) Filter[T] {
 	return Filter[T]{
 		max: nil,
 		min: &operand,

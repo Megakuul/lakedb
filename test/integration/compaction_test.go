@@ -34,14 +34,14 @@ func testCompaction(t *testing.T, bucket *lake.Bucket) {
 	ingestors[1].Insert(t.Context(), GameStatistic{
 		GameID:      lake.NewString(weakestGame),
 		Player:      lake.NewString("The Rizzler"),
-		Performance: lake.NewFloat(-67),
+		Performance: lake.NewFloat(-67.0),
 		Hits:        lake.NewInt(-67),
 		Accuracy:    lake.NewFloat(-0.69),
 	})
 	ingestors[2].Insert(t.Context(), GameStatistic{
 		GameID:      lake.NewString(bestGame),
 		Player:      lake.NewString("John fucking Cena"),
-		Performance: lake.NewFloat(99999999),
+		Performance: lake.NewFloat(99999999.0),
 		Hits:        lake.NewInt(math.MaxInt),
 		Accuracy:    lake.NewFloat(999999.9999),
 	})
@@ -51,7 +51,7 @@ func testCompaction(t *testing.T, bucket *lake.Bucket) {
 				GameID:      lake.NewString(uuid.NewString()),
 				Player:      lake.NewString(fmt.Sprintf("Big Baba %d %d", ingestorIdx, i)),
 				Performance: lake.NewFloat(float64(i)),
-				Hits:        lake.NewInt(int64(i % 100)),
+				Hits:        lake.NewInt(i % 100),
 				Accuracy:    lake.NewFloat(float64(i%100) * 0.1),
 			})
 		}

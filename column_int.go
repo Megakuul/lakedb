@@ -18,8 +18,8 @@ type Int struct {
 	Data       int64 `parquet:"data"`
 }
 
-func NewInt(value int64) Int {
-	return Int{Data: value}
+func NewInt[T ~int | ~int64](value T) Int {
+	return Int{Data: int64(value)}
 }
 
 func AggrInt(aggregation Aggregator[int64]) Int {
