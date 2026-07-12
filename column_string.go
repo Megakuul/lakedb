@@ -1,6 +1,7 @@
 package lake
 
 import (
+	"github.com/megakuul/lake/internal/catalog"
 	"github.com/parquet-go/parquet-go"
 )
 
@@ -31,45 +32,25 @@ func FilterString(filters ...Filter[string]) String {
 	return f
 }
 
-func (s String) higher(than any) (any, bool) {
-	if than, ok := than.(string); ok {
-		return &s.Data, s.Data > than
-	}
-	return nil, false
-}
-
-func (s String) lower(than any) (any, bool) {
-	if than, ok := than.(string); ok {
-		return &s.Data, s.Data < than
-	}
-	return nil, false
-}
-
-func (s String) max() any {
-	var max *string
+func (s String) createRange() catalog.Range {
+	var max, min string
+	var maxEnabled, minEnabled bool
 	for _, filter := range s.filters {
-		if filter.max != nil && (max == nil || *max < *filter.max) {
-			max = filter.max
+		if filter.max != nil && (!maxEnabled || max < *filter.max) {
+			maxEnabled = true
+			max = *filter.max
+		}
+		if filter.min != nil && (!minEnabled || min > *filter.min) {
+			minEnabled = true
+			min = *filter.min
 		}
 	}
-	if max == nil {
-		return nil
-	} else {
-		return *max
-	}
-}
-
-func (s String) min() any {
-	var min *string
-	for _, filter := range s.filters {
-		if filter.min != nil && (min == nil || *min > *filter.min) {
-			min = filter.min
-		}
-	}
-	if min == nil {
-		return nil
-	} else {
-		return *min
+	return catalog.Range{
+		Kind:       catalog.ColumnString,
+		MaxEnabled: maxEnabled,
+		MinEnabled: minEnabled,
+		MaxString:  max,
+		MinString:  min,
 	}
 }
 

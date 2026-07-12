@@ -1,6 +1,7 @@
 package lake
 
 import (
+	"github.com/megakuul/lake/internal/catalog"
 	"github.com/parquet-go/parquet-go"
 )
 
@@ -34,57 +35,37 @@ func FilterFloat(filters ...Filter[float64]) Float {
 	return Float{filters: filters}
 }
 
-func (s Float) higher(than any) (any, bool) {
-	if than, ok := than.(float64); ok {
-		return &s.Data, s.Data > than
-	}
-	return nil, false
-}
-
-func (s Float) lower(than any) (any, bool) {
-	if than, ok := than.(float64); ok {
-		return &s.Data, s.Data < than
-	}
-	return nil, false
-}
-
-func (s Float) max() any {
-	var max *float64
-	for _, filter := range s.filters {
-		if filter.max != nil && (max == nil || *max < *filter.max) {
-			max = filter.max
+func (f Float) createRange() catalog.Range {
+	var max, min float64
+	var maxEnabled, minEnabled bool
+	for _, filter := range f.filters {
+		if filter.max != nil && (!maxEnabled || max < *filter.max) {
+			maxEnabled = true
+			max = *filter.max
+		}
+		if filter.min != nil && (!minEnabled || min > *filter.min) {
+			minEnabled = true
+			min = *filter.min
 		}
 	}
-	if max == nil {
-		return nil
-	} else {
-		return *max
+	return catalog.Range{
+		Kind:       catalog.ColumnFloat,
+		MaxEnabled: maxEnabled,
+		MinEnabled: minEnabled,
+		MaxFloat:   max,
+		MinFloat:   min,
 	}
 }
 
-func (s Float) min() any {
-	var min *float64
-	for _, filter := range s.filters {
-		if filter.min != nil && (min == nil || *min > *filter.min) {
-			min = filter.min
-		}
-	}
-	if min == nil {
-		return nil
-	} else {
-		return *min
-	}
+func (f Float) canFilter() bool {
+	return len(f.filters) != 0
 }
 
-func (s Float) canFilter() bool {
-	return len(s.filters) != 0
-}
-
-func (s Float) filter(v parquet.Value) bool {
+func (f Float) filter(v parquet.Value) bool {
 	if v.Kind() != parquet.Double {
 		return true
 	}
-	for _, op := range s.filters {
+	for _, op := range f.filters {
 		if !op.check(v.Double()) {
 			return false
 		}
@@ -92,23 +73,23 @@ func (s Float) filter(v parquet.Value) bool {
 	return true
 }
 
-func (s Float) canGroup() bool {
-	return s.grouper != nil
+func (f Float) canGroup() bool {
+	return f.grouper != nil
 }
 
-func (s Float) group(value parquet.Value) parquet.Value {
-	return s.grouper(value)
+func (f Float) group(value parquet.Value) parquet.Value {
+	return f.grouper(value)
 }
 
-func (s Float) canAggregate() bool {
-	return s.aggregator != nil
+func (f Float) canAggregate() bool {
+	return f.aggregator != nil
 }
 
-func (s Float) aggregate(rows []parquet.Value) parquet.Value {
-	if s.aggregator == nil {
+func (f Float) aggregate(rows []parquet.Value) parquet.Value {
+	if f.aggregator == nil {
 		return parquet.NullValue()
 	}
-	return parquet.DoubleValue(s.aggregator(func(yield func(float64) bool) {
+	return parquet.DoubleValue(f.aggregator(func(yield func(float64) bool) {
 		for _, row := range rows {
 			if !yield(row.Double()) {
 				return

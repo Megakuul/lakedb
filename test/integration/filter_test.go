@@ -47,13 +47,16 @@ func testFilter(t *testing.T, bucket *lake.Bucket) {
 		Message:    lake.NewString("we caught him, however, now he is eating the control panel"),
 	})
 	// dump some garbage data inbetween
-	for i := range int64(50000) {
+	for i := range int64(100) {
 		ingestorB.Insert(t.Context(), Log{
 			Timestamp:  lake.NewInt(50 + i),
 			Service:    lake.NewString("elephantor"),
 			Importance: lake.NewFloat(0.0),
 			Message:    lake.NewString("GARBAGGEEGGEGEG"),
 		})
+		if err := ingestorB.Commit(t.Context()); err != nil {
+			t.Fatal(err)
+		}
 	}
 	ingestorA.Insert(t.Context(), Log{
 		Timestamp:  lake.NewInt(now.Unix() + 2),

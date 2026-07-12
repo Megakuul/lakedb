@@ -1,6 +1,7 @@
 package lake
 
 import (
+	"github.com/megakuul/lake/internal/catalog"
 	"github.com/parquet-go/parquet-go"
 )
 
@@ -34,45 +35,25 @@ func FilterInt(filters ...Filter[int64]) Int {
 	return Int{filters: filters}
 }
 
-func (i Int) higher(than any) (any, bool) {
-	if than, ok := than.(int64); ok {
-		return &i.Data, i.Data > than
-	}
-	return nil, false
-}
-
-func (i Int) lower(than any) (any, bool) {
-	if than, ok := than.(int64); ok {
-		return &i.Data, i.Data < than
-	}
-	return nil, false
-}
-
-func (i Int) max() any {
-	var max *int64
+func (i Int) createRange() catalog.Range {
+	var max, min int64
+	var maxEnabled, minEnabled bool
 	for _, filter := range i.filters {
-		if filter.max != nil && (max == nil || *max < *filter.max) {
-			max = filter.max
+		if filter.max != nil && (!maxEnabled || max < *filter.max) {
+			maxEnabled = true
+			max = *filter.max
+		}
+		if filter.min != nil && (!minEnabled || min > *filter.min) {
+			minEnabled = true
+			min = *filter.min
 		}
 	}
-	if max == nil {
-		return nil
-	} else {
-		return *max
-	}
-}
-
-func (i Int) min() any {
-	var min *int64
-	for _, filter := range i.filters {
-		if filter.min != nil && (min == nil || *min > *filter.min) {
-			min = filter.min
-		}
-	}
-	if min == nil {
-		return nil
-	} else {
-		return *min
+	return catalog.Range{
+		Kind:       catalog.ColumnInt,
+		MaxEnabled: maxEnabled,
+		MinEnabled: minEnabled,
+		MaxInt:     max,
+		MinInt:     min,
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/megakuul/lake/internal/catalog"
 	"github.com/parquet-go/parquet-go"
 )
 
@@ -73,13 +74,6 @@ type filterable interface {
 
 // boundable is implemented by column types that allow ranged index filters.
 type boundable interface {
-	// max returns a comparable representation of the maximum value boxed with any (nil means no max limit) (used for filter)
-	max() any
-	// min returns a comparable representation of the minimum value boxed with any (nil means no min limit) (used for filter)
-	min() any
-
-	// higher checks if the provided value is higher then the row value and if yes returns the value. (used for insertion)
-	higher(any) (any, bool)
-	// lower checks if the provided value is lower then the row value and if yes returns the value. (used for insertion)
-	lower(any) (any, bool)
+	// createRange returns the filter representation as catalog range.
+	createRange() catalog.Range
 }

@@ -44,7 +44,7 @@ func (b *QueryBuilder[T]) Where(filter T) *QueryBuilder[T] {
 		}
 		columnName := getColumnName(columnMeta)
 		if filter, ok := filterValue.FieldByIndex(columnMeta.Index).Interface().(boundable); ok {
-			ranges[columnName] = catalog.Range{Max: filter.max(), Min: filter.min()}
+			ranges[columnName] = filter.createRange()
 		}
 		if filter, ok := filterValue.FieldByIndex(columnMeta.Index).Interface().(filterable); ok && filter.canFilter() {
 			checks[columnName] = filter.filter

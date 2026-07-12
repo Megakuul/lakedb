@@ -310,7 +310,7 @@ func (b *Bucket) extract(rowGroup parquet.RowGroup, rows *big.Int) ([]parquet.Ro
 
 // scanChunk checks the boundary for each page and applies the filter to each row in matching pages.
 // It marks passing values in the matches bitset and skips filters on rows already filtered out in the skip bitset.
-func scanChunk(chunk parquet.ColumnChunk, matches, skip *big.Int, filterRange catalog.Range, check func(parquet.Value) bool) error {
+func scanChunk(chunk parquet.ColumnChunk, matches, skip *big.Int, filter catalog.Range, check func(parquet.Value) bool) error {
 	pages := chunk.Pages()
 	defer pages.Close()
 
@@ -325,31 +325,18 @@ func scanChunk(chunk parquet.ColumnChunk, matches, skip *big.Int, filterRange ca
 
 	scannablePages := []int64{}
 	for i := range columnIndex.NumPages() {
-		switch filterMax := filterRange.Max.(type) {
-		case int64:
-			if columnIndex.MinValue(i).Kind() != parquet.Int64 || columnIndex.MinValue(i).Int64() > filterMax {
+		pageMin, pageMax := columnIndex.MinValue(i), columnIndex.MaxValue(i)
+		switch filter.Kind {
+		case catalog.ColumnInt:
+			if (filter.MaxEnabled && pageMin.Int64() > filter.MaxInt) || (filter.MinEnabled && pageMax.Int64() < filter.MinInt) {
 				continue
 			}
-		case float64:
-			if columnIndex.MinValue(i).Kind() != parquet.Double || columnIndex.MinValue(i).Double() > filterMax {
+		case catalog.ColumnFloat:
+			if (filter.MaxEnabled && pageMin.Double() > filter.MaxFloat) || (filter.MinEnabled && pageMax.Double() < filter.MinFloat) {
 				continue
 			}
-		case string:
-			if columnIndex.MinValue(i).Kind() != parquet.ByteArray || string(columnIndex.MinValue(i).ByteArray()) > filterMax {
-				continue
-			}
-		}
-		switch filterMin := filterRange.Min.(type) {
-		case int64:
-			if columnIndex.MaxValue(i).Kind() != parquet.Int64 || columnIndex.MaxValue(i).Int64() < filterMin {
-				continue
-			}
-		case float64:
-			if columnIndex.MaxValue(i).Kind() != parquet.Double || columnIndex.MaxValue(i).Double() < filterMin {
-				continue
-			}
-		case string:
-			if columnIndex.MaxValue(i).Kind() != parquet.ByteArray || string(columnIndex.MaxValue(i).ByteArray()) < filterMin {
+		case catalog.ColumnString:
+			if (filter.MaxEnabled && string(pageMin.ByteArray()) > filter.MaxString) || (filter.MinEnabled && string(pageMax.ByteArray()) < filter.MinString) {
 				continue
 			}
 		}
@@ -391,35 +378,21 @@ func filterShards(shards []catalog.Shard, filter map[string]catalog.Range) []cat
 Shards:
 	for _, shard := range shards {
 		for column, shardRange := range shard.Ranges {
-			filterRange, ok := filter[column]
+			filter, ok := filter[column]
 			if !ok {
 				continue // unfiltered columns pass the filter
 			}
-			switch filterMax := filterRange.Max.(type) {
-			case int64:
-				if shardMin, ok := shardRange.Min.(int64); !ok || shardMin > filterMax {
+			switch filter.Kind {
+			case catalog.ColumnInt:
+				if (filter.MaxEnabled && shardRange.MinInt > filter.MaxInt) || (filter.MinEnabled && shardRange.MaxInt < filter.MinInt) {
 					continue Shards
 				}
-			case float64:
-				if shardMin, ok := shardRange.Min.(float64); !ok || shardMin > filterMax {
+			case catalog.ColumnFloat:
+				if (filter.MaxEnabled && shardRange.MinFloat > filter.MaxFloat) || (filter.MinEnabled && shardRange.MaxFloat < filter.MinFloat) {
 					continue Shards
 				}
-			case string:
-				if shardMin, ok := shardRange.Min.(string); !ok || shardMin > filterMax {
-					continue Shards
-				}
-			}
-			switch filterMin := filterRange.Min.(type) {
-			case int64:
-				if shardMax, ok := shardRange.Max.(int64); !ok || shardMax < filterMin {
-					continue Shards
-				}
-			case float64:
-				if shardMax, ok := shardRange.Max.(float64); !ok || shardMax < filterMin {
-					continue Shards
-				}
-			case string:
-				if shardMax, ok := shardRange.Max.(string); !ok || shardMax < filterMin {
+			case catalog.ColumnString:
+				if (filter.MaxEnabled && shardRange.MinString > filter.MaxString) || (filter.MinEnabled && shardRange.MaxString < filter.MinString) {
 					continue Shards
 				}
 			}

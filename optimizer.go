@@ -38,15 +38,15 @@ func createFilterColumns(schema *parquet.Schema, q *query) ([]filterColumn, erro
 		}
 
 		chunkCheck, checkAvailable := q.checks[columnName]
-		chunkRange := q.ranges[columnName]
-		if !checkAvailable && chunkRange.Max == nil && chunkRange.Min == nil {
+		chunkFilter := q.ranges[columnName]
+		if !checkAvailable && !chunkFilter.MaxEnabled && !chunkFilter.MinEnabled {
 			continue // no filter op or range defined; skip column entirely
 		}
 
-		if chunkRange.Min == nil {
+		if chunkFilter.MinEnabled {
 			weight += 10
 		}
-		if chunkRange.Max == nil {
+		if chunkFilter.MaxEnabled {
 			weight += 10
 		}
 
@@ -55,7 +55,7 @@ func createFilterColumns(schema *parquet.Schema, q *query) ([]filterColumn, erro
 			index:      i,
 			name:       columnName,
 			chunkCheck: chunkCheck,
-			chunkRange: chunkRange,
+			chunkRange: chunkFilter,
 		})
 	}
 	return slices.SortedFunc(slices.Values(filterColumns), func(a, b filterColumn) int {

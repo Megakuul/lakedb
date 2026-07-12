@@ -108,41 +108,44 @@ func extractRanges(schema *parquet.Schema, rowGroups thrift.Slice[format.RowGrou
 	for _, rowGroup := range rowGroups {
 		for column, chunk := range rowGroup.Columns {
 			columnName := schema.Columns()[column][0]
-			columnRange := ranges[columnName]
+			columnRange, update := ranges[columnName]
 
 			leaf, _ := schema.Lookup(chunk.MetaData.PathInSchema...)
 			kind := leaf.Node.Type().Kind()
 
 			stats := chunk.MetaData.Statistics
 
-			max := kind.Value(stats.MaxValue)
-			switch max.Kind() {
+			max, min := kind.Value(stats.MaxValue), kind.Value(stats.MinValue)
+			switch kind {
 			case parquet.Int64:
-				if currentMax, ok := columnRange.Max.(int64); !ok || currentMax < max.Int64() {
-					columnRange.Max = max.Int64()
+				columnRange.Kind = catalog.ColumnInt
+				if !update || columnRange.MaxInt < max.Int64() {
+					columnRange.MaxEnabled = true
+					columnRange.MaxInt = max.Int64()
+				}
+				if !update || columnRange.MinInt > min.Int64() {
+					columnRange.MinEnabled = true
+					columnRange.MinInt = min.Int64()
 				}
 			case parquet.Double:
-				if currentMax, ok := columnRange.Max.(float64); !ok || currentMax < max.Double() {
-					columnRange.Max = max.Double()
+				columnRange.Kind = catalog.ColumnFloat
+				if !update || columnRange.MaxFloat < max.Double() {
+					columnRange.MaxEnabled = true
+					columnRange.MaxFloat = max.Double()
+				}
+				if !update || columnRange.MinFloat > min.Double() {
+					columnRange.MinEnabled = true
+					columnRange.MinFloat = min.Double()
 				}
 			case parquet.ByteArray:
-				if currentMax, ok := columnRange.Max.(string); !ok || currentMax < string(max.ByteArray()) {
-					columnRange.Max = string(max.ByteArray())
+				columnRange.Kind = catalog.ColumnString
+				if !update || columnRange.MaxString < string(max.ByteArray()) {
+					columnRange.MaxEnabled = true
+					columnRange.MaxString = string(max.ByteArray())
 				}
-			}
-			min := kind.Value(stats.MinValue)
-			switch min.Kind() {
-			case parquet.Int64:
-				if currentMin, ok := columnRange.Min.(int64); !ok || currentMin > min.Int64() {
-					columnRange.Min = min.Int64()
-				}
-			case parquet.Double:
-				if currentMin, ok := columnRange.Min.(float64); !ok || currentMin > min.Double() {
-					columnRange.Min = min.Double()
-				}
-			case parquet.ByteArray:
-				if currentMin, ok := columnRange.Min.(string); !ok || currentMin > string(min.ByteArray()) {
-					columnRange.Min = string(min.ByteArray())
+				if !update || columnRange.MinString > string(max.ByteArray()) {
+					columnRange.MinEnabled = true
+					columnRange.MinString = string(min.ByteArray())
 				}
 			}
 			ranges[columnName] = columnRange

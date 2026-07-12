@@ -24,7 +24,26 @@ type Shard struct {
 	Ranges map[string]Range `json:"ranges"`
 }
 
+type ColumnKind int
+
+const (
+	ColumnString = iota
+	ColumnInt
+	ColumnFloat
+)
+
 type Range struct {
-	Max any `json:"max"`
-	Min any `json:"min"`
+	Kind ColumnKind `json:"kind"`
+
+	MaxEnabled bool `json:"max_enabled"`
+	MinEnabled bool `json:"min_enabled"`
+
+	MaxFloat float64 `json:"max_float,omitempty"`
+	MinFloat float64 `json:"min_float,omitempty"`
+
+	MaxInt int64 `json:"max_int,omitempty"`
+	MinInt int64 `json:"min_int,omitempty"`
+
+	MaxString string `json:"max_string,omitempty"`
+	MinString string `json:"min_string,omitempty"`
 }
