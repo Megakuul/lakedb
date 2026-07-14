@@ -27,7 +27,7 @@ func testAggregation(t *testing.T, bucket *lake.Bucket) {
 	// prepare
 	ingestorA, ingestorB := lake.NewIngestor[Request](bucket), lake.NewIngestor[Request](bucket)
 	ingestorA.Insert(t.Context(), Request{
-		Timestamp:   lake.NewInt(now.Unix()),
+		Timestamp:   lake.NewInt(now.UnixNano()),
 		Latency:     lake.NewInt(elephantLatencies[0]),
 		Endpoint:    lake.NewString("elephant"),
 		RequestorIQ: lake.NewFloat(requestorIq[0]),
@@ -35,13 +35,13 @@ func testAggregation(t *testing.T, bucket *lake.Bucket) {
 		Static:      420,
 	})
 	ingestorB.Insert(t.Context(), Request{
-		Timestamp:   lake.NewInt(now.Unix() + 1),
+		Timestamp:   lake.NewInt(now.UnixNano() + 1),
 		Latency:     lake.NewInt(elephantLatencies[1]),
 		Endpoint:    lake.NewString("elephant"),
 		RequestorIQ: lake.NewFloat(requestorIq[1]),
 	})
 	ingestorB.Insert(t.Context(), Request{
-		Timestamp:   lake.NewInt(now.Unix() + 2),
+		Timestamp:   lake.NewInt(now.UnixNano() + 2),
 		Latency:     lake.NewInt(ironcladLatencies[0]),
 		Endpoint:    lake.NewString("ironclad"),
 		RequestorIQ: lake.NewFloat(requestorIq[2]),
@@ -49,7 +49,7 @@ func testAggregation(t *testing.T, bucket *lake.Bucket) {
 		Static:      420,
 	})
 	ingestorA.Insert(t.Context(), Request{
-		Timestamp:   lake.NewInt(now.Unix() + 2),
+		Timestamp:   lake.NewInt(now.UnixNano() + 2),
 		Latency:     lake.NewInt(ironcladLatencies[1]),
 		Endpoint:    lake.NewString("ironclad"),
 		RequestorIQ: lake.NewFloat(requestorIq[3]),
@@ -60,14 +60,14 @@ func testAggregation(t *testing.T, bucket *lake.Bucket) {
 		generatedRequestorIq = append(generatedRequestorIq, float64(i)*0.3)
 		if i%2 == 0 {
 			ingestorB.Insert(t.Context(), Request{
-				Timestamp:   lake.NewInt(now.Add(time.Hour).Unix() + i),
+				Timestamp:   lake.NewInt(now.Add(time.Hour).UnixNano() + i),
 				Latency:     lake.NewInt(generatedIroncladLatency[i]),
 				Endpoint:    lake.NewString("ironclad"),
 				RequestorIQ: lake.NewFloat(generatedRequestorIq[i]),
 			})
 		} else {
 			ingestorA.Insert(t.Context(), Request{
-				Timestamp:   lake.NewInt(now.Add(time.Hour).Unix() + i),
+				Timestamp:   lake.NewInt(now.Add(time.Hour).UnixNano() + i),
 				Latency:     lake.NewInt(generatedIroncladLatency[i]),
 				Endpoint:    lake.NewString("ironclad"),
 				RequestorIQ: lake.NewFloat(generatedRequestorIq[i]),
@@ -75,13 +75,13 @@ func testAggregation(t *testing.T, bucket *lake.Bucket) {
 		}
 	}
 	ingestorB.Insert(t.Context(), Request{
-		Timestamp:   lake.NewInt(now.Unix() + 2),
+		Timestamp:   lake.NewInt(now.UnixNano() + 2),
 		Latency:     lake.NewInt(elephantLatencies[2]),
 		Endpoint:    lake.NewString("elephant"),
 		RequestorIQ: lake.NewFloat(requestorIq[4]),
 	})
 	ingestorA.Insert(t.Context(), Request{
-		Timestamp:   lake.NewInt(now.Unix() + 7),
+		Timestamp:   lake.NewInt(now.UnixNano() + 7),
 		Latency:     lake.NewInt(ironcladLatencies[2]),
 		Endpoint:    lake.NewString("ironclad"),
 		RequestorIQ: lake.NewFloat(requestorIq[5]),
@@ -119,7 +119,7 @@ func testAggregation(t *testing.T, bucket *lake.Bucket) {
 	}
 	for _, result := range orderedByEndpoint {
 		// group by datetrunc year should set this to start of the year -> now - 1 leap year should be before this.
-		if now.Add(-time.Hour * 8784).After(time.Unix(result.Timestamp.Data-1, 0)) {
+		if now.Add(-time.Hour * 8784).After(time.Unix(0, result.Timestamp.Data-1)) {
 			t.Fatalf("grouping did not correctly set timestamp group")
 		}
 		switch result.Endpoint.Data {

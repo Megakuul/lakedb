@@ -28,24 +28,24 @@ func In[T ~float64 | ~int64 | ~string](operands ...T) Filter[T] {
 	}
 }
 
-// Before only works for time.Unix (seconds) data, it checks if operand is BEFORE the row value.
+// Before only works for time.UnixNano (nanoseconds) data, it checks if operand is BEFORE the row value.
 func Before(operand time.Time) Filter[int64] {
 	return Filter[int64]{
-		max: new(operand.Unix()),
+		max: new(operand.UnixNano()),
 		min: nil,
 		check: func(left int64) bool {
-			return time.Unix(left, 0).Before(operand)
+			return time.Unix(0, left).Before(operand)
 		},
 	}
 }
 
-// After only works for time.Unix (seconds) data, it checks if operand is AFTER the row value.
+// After only works for time.UnixNano (nanoseconds) data, it checks if operand is AFTER the row value.
 func After(operand time.Time) Filter[int64] {
 	return Filter[int64]{
 		max: nil,
-		min: new(operand.Unix()),
+		min: new(operand.UnixNano()),
 		check: func(left int64) bool {
-			return time.Unix(left, 0).After(operand)
+			return time.Unix(0, left).After(operand)
 		},
 	}
 }

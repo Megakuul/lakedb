@@ -91,7 +91,8 @@ func Suffix(length int) Grouper {
 type DateRange int
 
 const (
-	DateMinute DateRange = iota
+	DateSecond DateRange = iota
+	DateMinute
 	DateHour
 	DateDay
 	DateMonth
@@ -105,28 +106,32 @@ func Date(r DateRange) Grouper {
 		if v.Kind() != parquet.Int64 {
 			return v
 		}
-		date := time.Unix(v.Int64(), 0).UTC()
+		date := time.Unix(0, v.Int64()).UTC()
 		switch r {
+		case DateSecond:
+			result = parquet.Int64Value(int64(time.Date(
+				date.Year(), date.Month(), date.Day(), date.Hour(), date.Minute(), date.Second(), 0, time.UTC,
+			).UnixNano()))
 		case DateMinute:
 			result = parquet.Int64Value(int64(time.Date(
 				date.Year(), date.Month(), date.Day(), date.Hour(), date.Minute(), 0, 0, time.UTC,
-			).Unix()))
+			).UnixNano()))
 		case DateHour:
 			result = parquet.Int64Value(int64(time.Date(
 				date.Year(), date.Month(), date.Day(), date.Hour(), 0, 0, 0, time.UTC,
-			).Unix()))
+			).UnixNano()))
 		case DateDay:
 			result = parquet.Int64Value(int64(time.Date(
 				date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC,
-			).Unix()))
+			).UnixNano()))
 		case DateMonth:
 			result = parquet.Int64Value(int64(time.Date(
 				date.Year(), date.Month(), 1, 0, 0, 0, 0, time.UTC,
-			).Unix()))
+			).UnixNano()))
 		case DateYear:
 			result = parquet.Int64Value(int64(time.Date(
 				date.Year(), 1, 1, 0, 0, 0, 0, time.UTC,
-			).Unix()))
+			).UnixNano()))
 		}
 		return result.Level(v.RepetitionLevel(), v.DefinitionLevel(), v.Column())
 	}

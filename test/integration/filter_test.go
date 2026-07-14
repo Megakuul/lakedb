@@ -33,7 +33,7 @@ func testFilter(t *testing.T, bucket *lake.Bucket) {
 	// prepare
 	ingestorA, ingestorB := lake.NewIngestor[Log](bucket), lake.NewIngestor[Log](bucket)
 	ingestorA.Insert(t.Context(), Log{
-		Timestamp:  lake.NewInt(now.Unix()),
+		Timestamp:  lake.NewInt(now.UnixNano()),
 		Service:    lake.NewString("elephant"),
 		Importance: lake.NewFloat(99.9),
 		Message:    lake.NewString("an elephant broke out of the cage; stop him..."),
@@ -41,7 +41,7 @@ func testFilter(t *testing.T, bucket *lake.Bucket) {
 		Static:     420,
 	})
 	ingestorB.Insert(t.Context(), Log{
-		Timestamp:  lake.NewInt(now.Unix() + 1),
+		Timestamp:  lake.NewInt(now.UnixNano() + 1),
 		Service:    lake.NewString("elephant"),
 		Importance: lake.NewFloat(20.0),
 		Message:    lake.NewString("we caught him, however, now he is eating the control panel"),
@@ -59,7 +59,7 @@ func testFilter(t *testing.T, bucket *lake.Bucket) {
 		}
 	}
 	ingestorA.Insert(t.Context(), Log{
-		Timestamp:  lake.NewInt(now.Unix() + 2),
+		Timestamp:  lake.NewInt(now.UnixNano() + 2),
 		Service:    lake.NewString("camera"),
 		Importance: lake.NewFloat(50.0),
 		Message:    lake.NewString("I detected an elephant in the room"),
@@ -74,12 +74,12 @@ func testFilter(t *testing.T, bucket *lake.Bucket) {
 		})
 	}
 	ingestorB.Insert(t.Context(), Log{
-		Timestamp:  lake.NewInt(now.Unix() + 3),
+		Timestamp:  lake.NewInt(now.UnixNano() + 3),
 		Importance: lake.NewFloat(1.0),
 		Message:    lake.NewString("wait guys this is my first day... what should I do here?"),
 	})
 	ingestorA.Insert(t.Context(), Log{
-		Timestamp:  lake.NewInt(now.Add(time.Hour).Unix()),
+		Timestamp:  lake.NewInt(now.Add(time.Hour).UnixNano()),
 		Service:    lake.NewString("camera"),
 		Importance: lake.NewFloat(13.37),
 		Message:    lake.NewString("the elephant in the room seems to be gone"),
