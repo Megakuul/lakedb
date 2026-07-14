@@ -68,5 +68,4 @@ func testSorting(t *testing.T, bucket *lake.Bucket) {
 	if rehabilitations[len(rehabilitations)-1].RehabilitationID.Data != weakestRehabilitation {
 		t.Fatalf("invalid sorting in lake ingestor")
 	}
-	t.Fail()
 }

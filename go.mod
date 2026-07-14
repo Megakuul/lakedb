@@ -10,7 +10,7 @@ require (
 	github.com/aws/smithy-go v1.27.2
 	github.com/google/uuid v1.6.0
 	github.com/johannesboyne/gofakes3 v0.0.0-20260208201424-4c385a1f6a73
-	github.com/parquet-go/parquet-go v0.30.1
+	github.com/parquet-go/parquet-go v0.30.2-0.20260713230428-988b7b98ab8d
 )
 
 require (

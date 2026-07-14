@@ -11,7 +11,7 @@ type Request struct {
 	lake.Table  `name:"request" sort:"latency:desc,Timestamp:asc"`
 	Timestamp   lake.Int
 	Latency     lake.Int    `parquet:"latency"`
-	Endpoint    lake.String `parquet:"endpoint,ignoreme123"`
+	Endpoint    lake.String `parquet:"endpoint"`
 	RequestorIQ lake.Float  `parquet:"req_iq"`
 
 	ignore lake.Float `parquet:"ignore"`
