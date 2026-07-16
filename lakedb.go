@@ -50,6 +50,15 @@ func getColumnName(table reflect.StructField) string {
 	return tag[0]
 }
 
+// When is convenience helper that applies some input only if the check is true otherwise the default value is returned.
+// Useful e.g. for filters, groups or aggregations if you want to only apply if an API value is not set to null.
+func When[T any](check bool, input T) (output T) {
+	if check {
+		return input
+	}
+	return output
+}
+
 // groupable is implemented by column types that allow custom grouping derivation functionality.
 type groupable interface {
 	canGroup() bool
